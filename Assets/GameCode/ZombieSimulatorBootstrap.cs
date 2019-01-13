@@ -1,20 +1,18 @@
-﻿using System;
-using Unity.Collections;
+﻿using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Rendering;
 using Unity.Transforms;
 using UnityEngine;
 
-
 public class ZombieSimulatorBootstrap
 {
-    private static ZombieSettings Settings;
+    public static ZombieSettings Settings { get; private set; }
 
-    public static MeshInstanceRenderer HumanLook;
-    public static MeshInstanceRenderer ZombieLook;
-
+    public static MeshInstanceRenderer HumanLook { get; private set; }
     public static EntityArchetype HumanArchetype { get; private set; }
+
+    public static MeshInstanceRenderer ZombieLook { get; private set; }
     public static EntityArchetype ZombieArchetype { get; private set; }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -27,10 +25,15 @@ public class ZombieSimulatorBootstrap
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     public static void InitializeWithScene()
     {
-        var settingsGO = GameObject.Find("ZombieSettings");
-        Settings = settingsGO?.GetComponent<ZombieSettings>();
-        if (!Settings)
-            return;
+        var settingsGo = GameObject.Find("ZombieSettings");
+        if (null == settingsGo) return;
+        
+        // Note: Doing this on Unity objects is bad practice, it
+        // bypasses the lifetime check of the engines object system.
+        // Settings = settingsGo?.GetComponent<ZombieSettings>();
+
+        Settings = settingsGo.GetComponent<ZombieSettings>();
+        if (!Settings) return;
 
         HumanLook = GetLookFromPrototype("HumanRenderPrototype");
         ZombieLook = GetLookFromPrototype("ZombieRenderPrototype");
@@ -45,85 +48,71 @@ public class ZombieSimulatorBootstrap
         CreateZombies(entityManager);
     }
 
-    private static void CreateZombies(EntityManager entityManager)
-    {
-        NativeArray<Entity> zombies = new NativeArray<Entity>(Settings.HumanCount, Allocator.Persistent);
-        entityManager.CreateEntity(ZombieArchetype, zombies);
-
-        for (int i = 0; i < Settings.HumanCount; i++)
-        {
-            var randomSpawnLocation = EntityUtil.GetOffScreenLocation();
-
-            // We can tweak a few components to make more sense like this.
-            InitializeZombie(entityManager, zombies[i], randomSpawnLocation);
-        }
-    }
-
-
-    public static void InitializeZombie(EntityManager entityManager, Entity zombie, float2 position)
-    {
-        entityManager.SetComponentData(zombie, new Position2D { Value = position });
-        entityManager.SetComponentData(zombie, new Heading2D { Value = new float2(1.0f, 0.0f) });
-        entityManager.SetComponentData(zombie, new MoveSpeed { speed = 0 });
-
-        // Finally we add a shared component which dictates the rendered look
-        entityManager.AddSharedComponentData(zombie, ZombieLook);
-    }
-
     private static void CreateHumans(EntityManager entityManager)
     {
-        int length = Settings.HumanCount;// + Settings.ZombieCount;
-        NativeArray<Entity> humans = new NativeArray<Entity>(length, Allocator.Persistent);
+        var humans = new NativeArray<Entity>(Settings.HumanCount, Allocator.Temp);
+        
         entityManager.CreateEntity(HumanArchetype, humans);
+        foreach (var human in humans) { SetupHumanoidEntity(
+            entityManager, human, Settings.HumanSpeed, HumanLook
+        ); }
 
-        for (int i = 0; i < length; i++)
-        {
-            var human = humans[i];
-            var randomSpawnLocation = ComputeSpawnLocation();
+        humans.Dispose();
+    }
+    
+    private static void CreateZombies(EntityManager entityManager)
+    {
+        var zombies = new NativeArray<Entity>(Settings.ZombieCount, Allocator.Temp);
+        
+        entityManager.CreateEntity(ZombieArchetype, zombies);
+        foreach (var zombie in zombies) { SetupHumanoidEntity(
+            entityManager, zombie, Settings.ZombieSpeed, ZombieLook
+        ); }
 
-            // We can tweak a few components to make more sense like this.
-            entityManager.SetComponentData(human, new Position2D { Value = randomSpawnLocation });
-            entityManager.SetComponentData(human, new Heading2D { Value = new float2(0.0f, 1.0f) });
-            entityManager.SetComponentData(human, new MoveSpeed { speed = Settings.HumanSpeed });
+        zombies.Dispose();
+    }
 
-            if (i < Settings.ZombieCount)
-            {
-                entityManager.SetComponentData(human, new Human { IsInfected = 1 });
-            }
+    private static void SetupHumanoidEntity(EntityManager entityManager, Entity entity, float moveSpeed, MeshInstanceRenderer renderer)
+    {
+        var position = ComputeSpawnLocation();
+        entityManager.SetComponentData(entity, new Position{
+            Value = new float3(position.x, 0.0f, position.y)
+        });
+        entityManager.SetComponentData(entity, new Rotation{
+            Value = Quaternion.identity
+        });
+        entityManager.SetComponentData(entity, new Position2D { Value = position });
+        entityManager.SetComponentData(entity, new Heading2D { Value = new float2(1.0f, 0.0f) });
+        entityManager.SetComponentData(entity, new MoveSpeed { speed = moveSpeed });
 
-            // Finally we add a shared component which dictates the rendered look
-            entityManager.AddSharedComponentData(human, HumanLook);
-        }
-
+        entityManager.AddSharedComponentData(entity, renderer);        
     }
 
     private static float2 ComputeSpawnLocation()
     {
         var settings = ZombieSettings.Instance;
 
-        float r = UnityEngine.Random.value;
-        float x0 = settings.Playfield.xMin;
-        float x1 = settings.Playfield.xMax;
-        float x = x0 + (x1 - x0) * r;
+        var r = UnityEngine.Random.value;
+        var x0 = settings.Playfield.xMin;
+        var x1 = settings.Playfield.xMax;
+        var x = x0 + (x1 - x0) * r;
 
-        float r2 = UnityEngine.Random.value;
-        float y0 = settings.Playfield.yMin;
-        float y1 = settings.Playfield.yMax;
-        float y = y0 + (y1 - y0) * r2;
+        var r2 = UnityEngine.Random.value;
+        var y0 = settings.Playfield.yMin;
+        var y1 = settings.Playfield.yMax;
+        var y = y0 + (y1 - y0) * r2;
 
         return new float2(x, y);
     }
 
     private static void DefineArchetypes(EntityManager entityManager)
     {
-        //Humans - Composition of the humans
-
         HumanArchetype = entityManager.CreateArchetype(typeof(Human),
-                                                        typeof(Position),
-                                                        typeof(Rotation),
-                                                        typeof(Heading2D),
-                                                        typeof(MoveSpeed),
-                                                        typeof(Position2D));
+                                                       typeof(Position),
+                                                       typeof(Rotation),
+                                                       typeof(Heading2D),
+                                                       typeof(MoveSpeed),
+                                                       typeof(Position2D));
 
         ZombieArchetype = entityManager.CreateArchetype(typeof(Zombie),
                                                         typeof(Position),
