@@ -3,8 +3,8 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
-using Unity.Transforms2D;
 using UnityEngine;
+using Unity.Burst;
 
 [UpdateAfter(typeof(HumanToZombieSystem))]
 [UpdateAfter(typeof(HumanNavigationSystem))]
@@ -17,11 +17,16 @@ class ZombieTargetingSystem : JobComponentSystem
     public NativeList<Human> Humans;
     public NativeList<Position2D> HumanPositions;
 
-    protected override void OnCreateManager(int capacity)
+    protected override void OnStartRunning()
     {
         Humans = new NativeList<Human>(Allocator.Persistent);
         HumanPositions = new NativeList<Position2D>(Allocator.Persistent);
-        base.OnCreateManager(capacity);
+    }
+    
+    protected override void OnStopRunning()
+    {
+        HumanPositions.Dispose();
+        Humans.Dispose();
     }
 
     protected override JobHandle OnUpdate(JobHandle inputDeps)
@@ -58,7 +63,7 @@ class ZombieTargetingSystem : JobComponentSystem
     }
 }
 
-[ComputeJobOptimization]
+[BurstCompile]
 public struct CopyHumansToNativeListJob : IJobParallelFor
 {
     [ReadOnly]
@@ -74,7 +79,7 @@ public struct CopyHumansToNativeListJob : IJobParallelFor
     }
 }
 
-[ComputeJobOptimization]
+[BurstCompile]
 public struct ZombieTargetingJob : IJobParallelFor
 {
     public ZombieTargetingData zombieTargetingData;
@@ -143,14 +148,14 @@ public struct ZombieTargetingJob : IJobParallelFor
 
 public struct ZombieTargetingData
 {
-    public int Length;
+    public readonly int Length;
     [ReadOnly] public ComponentDataArray<Position2D> Position;
     public ComponentDataArray<Zombie> Zombie;
 }
 
 public struct HumanTargetingData
 {
-    public int Length;
+    public readonly int Length;
     [ReadOnly] public ComponentDataArray<Position2D> Positions;
     [ReadOnly] public ComponentDataArray<Human> Humans;
 }

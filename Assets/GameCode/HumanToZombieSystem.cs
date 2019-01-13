@@ -4,7 +4,7 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Rendering;
 using Unity.Transforms;
-using Unity.Transforms2D;
+using Unity.Burst;
 
 class HumanToZombieSystem : JobComponentSystem
 {
@@ -22,7 +22,7 @@ class HumanToZombieSystem : JobComponentSystem
         return job.Schedule(humanData.Length, 64, inputDeps);
     }
 }
-[ComputeJobOptimization]
+[BurstCompile]
 public struct HumanToZombieJob : IJobParallelFor
 {
     public HumanConversionData humanData;
@@ -55,7 +55,7 @@ public struct HumanToZombieJob : IJobParallelFor
 
 public struct HumanConversionData
 {
-    public int Length;
+    public readonly int Length;
     public ComponentDataArray<Position2D> Positions;
     public ComponentDataArray<Human> Humans;
     public ComponentDataArray<MoveSpeed> MoveSpeeds;
@@ -63,7 +63,7 @@ public struct HumanConversionData
 
 public struct ZombieConversionData
 {
-    public int Length;
+    public readonly int Length;
     //[ReadOnly] public ComponentDataArray<Position2D> Positions;
     public ComponentDataArray<Zombie> Zombies;
 }

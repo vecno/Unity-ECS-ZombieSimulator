@@ -3,8 +3,8 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
-using Unity.Transforms2D;
 using UnityEngine;
+using Unity.Burst;
 
 [UpdateAfter(typeof(HumanToZombieSystem))]
 class HumanNavigationSystem : JobComponentSystem
@@ -18,8 +18,8 @@ class HumanNavigationSystem : JobComponentSystem
     {
         for (int i = 0; i < humanDatum.Length; i++)
         {
-            randomFloats[i] = Random.value;
-            randomFloats2[i] = Random.value;
+            randomFloats[i] = UnityEngine.Random.value;
+            randomFloats2[i] = UnityEngine.Random.value;
         }
 
         var humanNavigationJob = new HumanNavigationJob
@@ -33,7 +33,7 @@ class HumanNavigationSystem : JobComponentSystem
         return humanNavigationJob.Schedule(humanDatum.Length, 64, inputDeps);
     }
 }
-[ComputeJobOptimization]
+[BurstCompile]
 struct HumanNavigationJob : IJobParallelFor
 {
     public HumanData humanDatum;
@@ -72,7 +72,7 @@ struct HumanNavigationJob : IJobParallelFor
 
 public struct HumanData
 {
-    public int Length;
+    public readonly int Length;
     public ComponentDataArray<Position2D> Positions;
     public ComponentDataArray<Heading2D> Heading;
     public ComponentDataArray<MoveSpeed> MoveSpeed;

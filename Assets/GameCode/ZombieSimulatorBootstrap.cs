@@ -4,7 +4,6 @@ using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Rendering;
 using Unity.Transforms;
-using Unity.Transforms2D;
 using UnityEngine;
 
 
@@ -120,16 +119,18 @@ public class ZombieSimulatorBootstrap
         //Humans - Composition of the humans
 
         HumanArchetype = entityManager.CreateArchetype(typeof(Human),
+                                                        typeof(Position),
+                                                        typeof(Rotation),
                                                         typeof(Heading2D),
                                                         typeof(MoveSpeed),
-                                                        typeof(Position2D),
-                                                        typeof(TransformMatrix));
+                                                        typeof(Position2D));
 
         ZombieArchetype = entityManager.CreateArchetype(typeof(Zombie),
+                                                        typeof(Position),
+                                                        typeof(Rotation),
                                                         typeof(Heading2D),
                                                         typeof(MoveSpeed),
-                                                        typeof(Position2D),
-                                                        typeof(TransformMatrix));
+                                                        typeof(Position2D));
     }
 
     private static MeshInstanceRenderer GetLookFromPrototype(string protoName)

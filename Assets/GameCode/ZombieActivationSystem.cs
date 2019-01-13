@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Transforms;
-using Unity.Transforms2D;
+using Unity.Burst;
 
 class ZombieActivationSystem : JobComponentSystem
 {
@@ -24,7 +24,7 @@ class ZombieActivationSystem : JobComponentSystem
         return job.Schedule(zombieData.Length, 64, inputDeps);
     }
 }
-[ComputeJobOptimization]
+[BurstCompile]
 public struct ZombieActivationJob : IJobParallelFor
 {
     public ZombieActivationData zombieData;
@@ -53,7 +53,7 @@ public struct ZombieActivationJob : IJobParallelFor
 
 public struct ZombieActivationData
 {
-    public int Length;
+    public readonly int Length;
     public ComponentDataArray<Position2D> Positions;
     public ComponentDataArray<Zombie> Zombies;
     public ComponentDataArray<MoveSpeed> MoveSpeeds;

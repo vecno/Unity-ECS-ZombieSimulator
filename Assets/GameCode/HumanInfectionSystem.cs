@@ -2,8 +2,8 @@
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
-using Unity.Transforms2D;
 using UnityEngine;
+using Unity.Burst;
 
 [UpdateAfter(typeof(HumanToZombieSystem))]
 class HumanInfectionSystem : JobComponentSystem
@@ -24,7 +24,7 @@ class HumanInfectionSystem : JobComponentSystem
     }
 }
 
-[ComputeJobOptimization]
+[BurstCompile]
 struct HumanInfectionJob : IJobParallelFor
 {
     public ZombiePositionData zombieTargetData;
@@ -59,14 +59,14 @@ struct HumanInfectionJob : IJobParallelFor
 
 public struct HumanInfectionData
 {
-    public int Length;
+    public readonly int Length;
     [ReadOnly] public ComponentDataArray<Position2D> Positions;
     public ComponentDataArray<Human> Humans;
 }
 
 public struct ZombiePositionData
 {
-    public int Length;
+    public readonly int Length;
     [ReadOnly] public ComponentDataArray<Position2D> Positions;
     [ReadOnly] public ComponentDataArray<Zombie> Zombies;
 }

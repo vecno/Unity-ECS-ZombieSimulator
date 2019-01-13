@@ -3,8 +3,8 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
-using Unity.Transforms2D;
 using UnityEngine;
+using Unity.Burst;
 
 [UpdateAfter(typeof(HumanToZombieSystem))]
 class ZombieNavigationSystem : JobComponentSystem
@@ -24,7 +24,7 @@ class ZombieNavigationSystem : JobComponentSystem
         return job.Schedule(zombieDatum.Length, 64, inputDeps);
     }
 }
-[ComputeJobOptimization]
+[BurstCompile]
 public struct ZombieNavigationJob : IJobParallelFor
 {
     public ZombieData zombieTargetingData;
@@ -63,7 +63,7 @@ public struct ZombieNavigationJob : IJobParallelFor
 
 public struct ZombieData
 {
-    public int Length;
+    public readonly int Length;
     [ReadOnly] public ComponentDataArray<Position2D> Position;
     public ComponentDataArray<Heading2D> Heading;
     public ComponentDataArray<MoveSpeed> MoveSpeeds;
@@ -72,7 +72,7 @@ public struct ZombieData
 
 public struct ZombieTargetData
 {
-    public int Length;
+    public readonly int Length;
     [ReadOnly] public ComponentDataArray<Position2D> Positions;
     [ReadOnly] public ComponentDataArray<Human> Humans;
 }
