@@ -7,7 +7,7 @@ using Unity.Transforms;
 using UnityEngine;
 
 [UpdateAfter(typeof(HumanNavigationSystem))]
-public class EnityMovementSystem : JobComponentSystem
+public class EntityMovementSystem : JobComponentSystem
 {
     protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
