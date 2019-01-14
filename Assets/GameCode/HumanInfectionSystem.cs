@@ -2,71 +2,76 @@
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
-using UnityEngine;
+using Unity.Transforms;
 using Unity.Burst;
 
-[UpdateAfter(typeof(HumanToZombieSystem))]
 class HumanInfectionSystem : JobComponentSystem
 {
-    [Inject] private ZombiePositionData zombieTargetData;
-    [Inject] private HumanInfectionData humanData;
+    private ComponentGroup humanDataGroup;
+    private ComponentGroup zombieDataGroup;
 
+    protected override void OnStartRunning()
+    {
+        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Position));
+        zombieDataGroup = GetComponentGroup(typeof(Zombie), typeof(Position));
+    }
+    
     protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
+        var humanData = humanDataGroup.GetComponentDataArray<Human>();
+        var humanPosition = humanDataGroup.GetComponentDataArray<Position>();
+        
+        var zombieData = zombieDataGroup.GetComponentDataArray<Zombie>();
+        var zombiePosition = zombieDataGroup.GetComponentDataArray<Position>();
+        
         var job = new HumanInfectionJob
         {
-            zombieTargetData = zombieTargetData,
             humanData = humanData,
+            zombieData = zombieData,
+            humanPositions = humanPosition,
+            zombiePositions = zombiePosition,
             infectionDistance = ZombieSettings.Instance.InfectionDistance
         };
 
-        return job.Schedule(humanData.Length, humanData.Length, inputDeps);
+        return job.Schedule(zombieData.Length, humanData.Length, inputDeps);
     }
 }
 
 [BurstCompile]
-struct HumanInfectionJob : IJobParallelFor
+public struct HumanInfectionJob : IJobParallelFor
 {
-    public ZombiePositionData zombieTargetData;
-
-    [NativeDisableParallelForRestriction]
-    public HumanInfectionData humanData;
-
     public float infectionDistance;
+    
+    public ComponentDataArray<Human> humanData;
+    
+    [ReadOnly]
+    public ComponentDataArray<Zombie> zombieData;
+    [ReadOnly]
+    public ComponentDataArray<Position> humanPositions;
+    [ReadOnly]
+    public ComponentDataArray<Position> zombiePositions;
 
     public void Execute(int index)
     {
-        var zombie = zombieTargetData.Zombies[index];
-        if (zombie.HumanTargetIndex == -1 || zombie.BecomeActive != 1)
+        var zombie = zombieData[index];
+        
+        if (zombie.TargetIndex == -1)
+            return;
+        if (zombie.BecomeActive != 1)
             return;
 
-        var human = humanData.Humans[zombie.HumanTargetIndex];
-        if (human.IsInfected == 1)
+        var human = humanData[zombie.TargetIndex];
+        if (human.IsInfected == 1) return;
+
+        var distSquared = math.distance(
+            zombiePositions[index].Value.xz,
+            humanPositions[zombie.TargetIndex].Value.xz
+        );
+
+        if (infectionDistance < distSquared) 
             return;
-
-        float2 humanPosition = humanData.Positions[zombie.HumanTargetIndex].Value;
-        float2 zombiePosition = zombieTargetData.Positions[index].Value;
-
-        float distSquared = math.distance(zombiePosition, humanPosition);
-
-        if (distSquared < infectionDistance)
-        {
-            human.IsInfected = 1;
-            humanData.Humans[zombie.HumanTargetIndex] = human;
-        }
+        
+        human.IsInfected = 1;
+        humanData[zombie.TargetIndex] = human;
     }
-}
-
-public struct HumanInfectionData
-{
-    public readonly int Length;
-    [ReadOnly] public ComponentDataArray<Position2D> Positions;
-    public ComponentDataArray<Human> Humans;
-}
-
-public struct ZombiePositionData
-{
-    public readonly int Length;
-    [ReadOnly] public ComponentDataArray<Position2D> Positions;
-    [ReadOnly] public ComponentDataArray<Zombie> Zombies;
 }

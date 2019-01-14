@@ -2,79 +2,107 @@
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
-using Unity.Transforms;
 using UnityEngine;
 using Unity.Burst;
 
 [UpdateAfter(typeof(HumanToZombieSystem))]
 class HumanNavigationSystem : JobComponentSystem
 {
-    [Inject] private HumanData humanDatum;
-
-    NativeArray<float> randomFloats = new NativeArray<float>(1000000, Allocator.Persistent);
-    NativeArray<float> randomFloats2 = new NativeArray<float>(1000000, Allocator.Persistent);
+    private long headingSeed;
+    
+    private ComponentGroup humanDataGroup;
+    
+    protected override void OnStartRunning()
+    {
+        headingSeed = (long)(long.MaxValue * UnityEngine.Random.value);
+        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Heading));
+    }
 
     protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
-        for (int i = 0; i < humanDatum.Length; i++)
-        {
-            randomFloats[i] = UnityEngine.Random.value;
-            randomFloats2[i] = UnityEngine.Random.value;
-        }
+        var x = headingSeed;
+        // Randomize the seed value every frame.
+        x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+        headingSeed = x;
 
-        var humanNavigationJob = new HumanNavigationJob
-        {
-            humanDatum = humanDatum,
-            dt = Time.deltaTime,
-            randomFloats = randomFloats,
-            randomFloats2 = randomFloats2
+        var humans = humanDataGroup.GetComponentDataArray<Human>();
+        var headings = humanDataGroup.GetComponentDataArray<Heading>();
+        
+        var directions = new NativeArray<float2>(
+            headings.Length, Allocator.TempJob
+        );
+        
+        var directionsJob = new RandDirectionsJob{
+            seed = headingSeed,
+            directions = directions
         };
-
-        return humanNavigationJob.Schedule(humanDatum.Length, 64, inputDeps);
+        var navigationJob = new HumanNavigationJob{
+            dt = Time.deltaTime,
+            humans = humans,
+            headings = headings,
+            directions = directions
+            
+        };
+        
+        var jobHandle = directionsJob.Schedule(
+            directions.Length, 64, inputDeps
+        );
+        return navigationJob.Schedule(
+            headings.Length, 64, jobHandle
+        );
     }
-}
-[BurstCompile]
-struct HumanNavigationJob : IJobParallelFor
-{
-    public HumanData humanDatum;
-    public float dt;
-    public NativeArray<float> randomFloats;
-    public NativeArray<float> randomFloats2;
 
-    public void Execute(int index)
+    [BurstCompile]
+    private struct RandDirectionsJob : IJobParallelFor
     {
-        var human = humanDatum.Human[index];
+        [ReadOnly]
+        public long seed;
+    
+        public NativeArray<float2> directions;
 
-        if (human.IsInfected == 1)
-            return;
-
-        human.TimeTillNextDirectionChange -= dt;
-
-        if (human.TimeTillNextDirectionChange <= 0)
+        public void Execute(int index)
         {
-            human.TimeTillNextDirectionChange = 5;
-
-            float randomX = (randomFloats[index] - 0.5f) * 2f;
-            float randomY = (randomFloats2[index] - 0.5f) * 2f;
-
-            Heading2D heading2D = humanDatum.Heading[index];
-            heading2D.Value = new float2(randomX, randomY);
-            humanDatum.Heading[index] = heading2D;
-
-            //MoveSpeed moveSpeed = humanDatum.MoveSpeed[index];
-            //moveSpeed.speed = index;
-            //humanDatum.MoveSpeed[index] = moveSpeed;
+            var x = (seed * index) + seed;
+            // Randomize shared seed and round it.
+            x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+            var val = new double2((int)x, (int)(x >> 32));
+            directions[index] = (float2) ((val + CMi) / CMui);
         }
-
-        humanDatum.Human[index] = human;
+    
+        private const double CMi = 2147483646.0;
+        private const double CMui = 4294967293.0;
     }
-}
 
-public struct HumanData
-{
-    public readonly int Length;
-    public ComponentDataArray<Position2D> Positions;
-    public ComponentDataArray<Heading2D> Heading;
-    public ComponentDataArray<MoveSpeed> MoveSpeed;
-    public ComponentDataArray<Human> Human;
+    [BurstCompile]
+    private struct HumanNavigationJob : IJobParallelFor
+    {
+        public float dt;
+
+        [DeallocateOnJobCompletionAttribute]
+        public NativeArray<float2> directions;
+        
+        public ComponentDataArray<Human> humans;
+        public ComponentDataArray<Heading> headings;
+
+        public void Execute(int index)
+        {
+            // Note: It seems this split is not needed,
+            // the goal is to pack related data in memory.
+            // Why is the countdown timer in an other array?
+            // The reason Heading and old movement was removed?
+            
+            var human = humans[index];
+            human.TimeTillNextDirectionChange -= dt;
+            
+            if (human.TimeTillNextDirectionChange > 0)
+            { humans[index] = human; return; }
+            
+            human.TimeTillNextDirectionChange = 5;
+            humans[index] = human;
+            
+            var heading = headings[index];
+            heading.Value = (directions[index] - 0.5f) * 0.5f;
+            headings[index] = heading;
+        }
+    }
 }

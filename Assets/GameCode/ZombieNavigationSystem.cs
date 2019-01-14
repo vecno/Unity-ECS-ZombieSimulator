@@ -1,78 +1,88 @@
 ﻿using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
-using Unity.Mathematics;
 using Unity.Transforms;
-using UnityEngine;
+using Unity.Mathematics;
 using Unity.Burst;
 
-[UpdateAfter(typeof(HumanToZombieSystem))]
+[UpdateAfter(typeof(ZombieTargetingSystem))]
 class ZombieNavigationSystem : JobComponentSystem
 {
-    [Inject] private ZombieData zombieDatum;
-    [Inject] private ZombieTargetData zombieTargetDatume;
+    private ComponentGroup zombieDataGroup;
+    private ComponentGroup zombieTargetGroup;
+
+    protected override void OnStartRunning()
+    {
+        // Note: In theory this system only needs the position of the human targets,
+        // in practice we leave this in to hint to a merger with the targeting system.
+        // Reason: Keeping these component groups up-to-date takes time, and this setup
+        // matches that of the targeting system, so why is it not a part of this system.
+        zombieDataGroup = GetComponentGroup(typeof(Zombie), typeof(Heading), typeof(Velocity), typeof(Position));
+        zombieTargetGroup = GetComponentGroup(typeof(Human), typeof(Heading), typeof(Position));
+    }
 
     protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
-        var job = new ZombieNavigationJob
-        {
-            zombieTargetingData = zombieDatum,
-            humanTargetingData = zombieTargetDatume,
-            dt = Time.deltaTime
+        var zombieData = zombieDataGroup.GetComponentDataArray<Zombie>();
+        var zombieHeading = zombieDataGroup.GetComponentDataArray<Heading>();
+        var zombieVelocity = zombieDataGroup.GetComponentDataArray<Velocity>();
+        var zombiePosition = zombieDataGroup.GetComponentDataArray<Position>();
+        
+        var humanPosition = zombieTargetGroup.GetComponentDataArray<Position>();
+        
+        var navigationJob = new ZombieNavigationJob{
+            zombieSpeed = ZombieSettings.Instance.ZombieSpeed,
+            zombieHeading = zombieHeading,
+            zombieVelocity = zombieVelocity,
+            zombieData = zombieData,
+            humanPosition = humanPosition,
+            zombiePosition = zombiePosition
         };
 
-        return job.Schedule(zombieDatum.Length, 64, inputDeps);
+        return navigationJob.Schedule(
+            zombieData.Length, 64, inputDeps
+        );
     }
 }
+
 [BurstCompile]
 public struct ZombieNavigationJob : IJobParallelFor
 {
-    public ZombieData zombieTargetingData;
-
-    [NativeDisableParallelForRestriction]
-    public ZombieTargetData humanTargetingData;
-
-    public float dt;
+    public float zombieSpeed;
+    
+    public ComponentDataArray<Heading> zombieHeading;
+    public ComponentDataArray<Velocity> zombieVelocity;
+ 
+    [ReadOnly]
+    public ComponentDataArray<Zombie> zombieData;
+    [ReadOnly]
+    public ComponentDataArray<Position> humanPosition;
+    [ReadOnly]
+    public ComponentDataArray<Position> zombiePosition;
 
     public void Execute(int index)
     {
-        var zombie = zombieTargetingData.Zombie[index];
+        var zombie = zombieData[index];
+        
         if (zombie.BecomeActive != 1)
             return;
-        if (zombie.HumanTargetIndex == -1)
+        
+        var velocity = zombieVelocity[index];
+        if (zombie.TargetIndex == -1)
         {
-            var moveSpeed = zombieTargetingData.MoveSpeeds[index];
-            moveSpeed.speed = 0;
-            zombieTargetingData.MoveSpeeds[index] = moveSpeed;
+            velocity.Value = 0;
+            zombieVelocity[index] = velocity;
             return;
         }
+        velocity.Value = zombieSpeed;
+        zombieVelocity[index] = velocity;   
+        
+        var to = humanPosition[zombie.TargetIndex].Value.xz;
+        var from = zombiePosition[index].Value.xz;
+        var nextHeading = math.normalize(to - from);
 
-        float2 zombiePosition = zombieTargetingData.Position[index].Value;
-        float2 newHeading = new float2(0, 1);
-        float2 humanPosition = humanTargetingData.Positions[zombie.HumanTargetIndex].Value;
-        float2 delta = humanPosition - zombiePosition;
-
-        newHeading = math.normalize(delta);
-
-        var heading = zombieTargetingData.Heading[index];
-        heading.Value = newHeading;
-        zombieTargetingData.Heading[index] = heading;
-
+        var heading = zombieHeading[index];
+        heading.Value = nextHeading;
+        zombieHeading[index] = heading;
     }
-}
-
-public struct ZombieData
-{
-    public readonly int Length;
-    [ReadOnly] public ComponentDataArray<Position2D> Position;
-    public ComponentDataArray<Heading2D> Heading;
-    public ComponentDataArray<MoveSpeed> MoveSpeeds;
-    [ReadOnly] public ComponentDataArray<Zombie> Zombie;
-}
-
-public struct ZombieTargetData
-{
-    public readonly int Length;
-    [ReadOnly] public ComponentDataArray<Position2D> Positions;
-    [ReadOnly] public ComponentDataArray<Human> Humans;
 }

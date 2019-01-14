@@ -1,69 +1,79 @@
-﻿using Unity.Collections;
-using Unity.Entities;
+﻿using Unity.Entities;
 using Unity.Jobs;
-using Unity.Mathematics;
-using Unity.Rendering;
 using Unity.Transforms;
 using Unity.Burst;
 
+[UpdateAfter(typeof(HumanInfectionSystem))]
 class HumanToZombieSystem : JobComponentSystem
 {
-    [Inject] private HumanConversionData humanData;
-    [Inject] private ZombieConversionData zombieData;
+    private ComponentGroup humanDataGroup;
+    private ComponentGroup zombieDataGroup;
+    
+    protected override void OnStartRunning()
+    {
+        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Velocity), typeof(Position));
+        zombieDataGroup = GetComponentGroup(typeof(Zombie));
+    }
 
     protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
-        var job = new HumanToZombieJob
-        {
+        var humanData = humanDataGroup.GetComponentDataArray<Human>();
+        var humanPositions = humanDataGroup.GetComponentDataArray<Position>();
+        var humanVelocities = humanDataGroup.GetComponentDataArray<Velocity>();
+        
+        var zombieData = zombieDataGroup.GetComponentDataArray<Zombie>();
+        
+        var toZombieJob = new HumanToZombieJob{
             humanData = humanData,
-            zombieData = zombieData
+            zombieData = zombieData,
+            humanPositions = humanPositions,
+            humanVelocities = humanVelocities
         };
 
-        return job.Schedule(humanData.Length, 64, inputDeps);
+        return toZombieJob.Schedule(
+            humanData.Length, 64, inputDeps
+        );
     }
 }
+
 [BurstCompile]
 public struct HumanToZombieJob : IJobParallelFor
 {
-    public HumanConversionData humanData;
-    public ZombieConversionData zombieData;
+    public ComponentDataArray<Human> humanData;
+    public ComponentDataArray<Zombie> zombieData;
+
+    public ComponentDataArray<Position> humanPositions;
+    public ComponentDataArray<Velocity> humanVelocities;
 
     public void Execute(int index)
     {
-        var human = humanData.Humans[index];
-        if (human.IsInfected == 1 && human.WasConverted == 0)
-        {
-            var position = humanData.Positions[index];
-            var humanOriginalPosition = position.Value;
-            position.Value = EntityUtil.GetOffScreenLocation();
-            humanData.Positions[index] = position;
+        var human = humanData[index];
+        
+        if (human.IsInfected != 1)
+            return;
+        if (human.WasConverted != 0)
+            return;
 
-            var zombie = zombieData.Zombies[index];
-            zombie.BecomeActive = 1;
-            zombie.BecomeZombiePosition = humanOriginalPosition;
-            zombieData.Zombies[index] = zombie;
+        // Note: Awkward part: Assumes that there is a zombie
+        // for every human and that this zombie is not active.
+        // It also depends on array indices as key's, bad form.
+        
+        var position = humanPositions[index];
+        var originalPosition = position.Value;
 
-            var moveSpeed = humanData.MoveSpeeds[index];
-            moveSpeed.speed = 0;
-            humanData.MoveSpeeds[index] = moveSpeed;
+        position.Value = EntityUtil.GetOffScreenLocation();
+        humanPositions[index] = position;
 
-            human.WasConverted = 1;
-            humanData.Humans[index] = human;
-        }
+        var zombie = zombieData[index];
+        zombie.BecomeActive = 1;
+        zombie.BecomeZombiePosition = originalPosition.xz;
+        zombieData[index] = zombie;
+
+        var velocity = humanVelocities[index];
+        velocity.Value = 0;
+        humanVelocities[index] = velocity;
+
+        human.WasConverted = 1;
+        humanData[index] = human;
     }
-}
-
-public struct HumanConversionData
-{
-    public readonly int Length;
-    public ComponentDataArray<Position2D> Positions;
-    public ComponentDataArray<Human> Humans;
-    public ComponentDataArray<MoveSpeed> MoveSpeeds;
-}
-
-public struct ZombieConversionData
-{
-    public readonly int Length;
-    //[ReadOnly] public ComponentDataArray<Position2D> Positions;
-    public ComponentDataArray<Zombie> Zombies;
 }

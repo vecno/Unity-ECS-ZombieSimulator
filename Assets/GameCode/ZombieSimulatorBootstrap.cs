@@ -4,6 +4,7 @@ using Unity.Mathematics;
 using Unity.Rendering;
 using Unity.Transforms;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 public class ZombieSimulatorBootstrap
 {
@@ -48,42 +49,80 @@ public class ZombieSimulatorBootstrap
         CreateZombies(entityManager);
     }
 
+    // Note: Pooling on indices is bad practice, there is no guaranty
+    // that the indices of entities will remain unchanged across frames.
+    // Indices can also vary depending on the component group composition.
+    
     private static void CreateHumans(EntityManager entityManager)
     {
         var humans = new NativeArray<Entity>(Settings.HumanCount, Allocator.Temp);
-        
         entityManager.CreateEntity(HumanArchetype, humans);
-        foreach (var human in humans) { SetupHumanoidEntity(
-            entityManager, human, Settings.HumanSpeed, HumanLook
-        ); }
+        
+        var counter = 0;
+        foreach (var human in humans)
+        {
+            SetupHumanoidEntity(
+                entityManager, human, 
+                Settings.HumanSpeed, HumanLook
+            );
+            var position = ComputeSpawnLocation();
+            entityManager.SetComponentData(human, new Human{
+                TimeTillNextDirectionChange = 15 * Random.value
+            });
+            entityManager.SetComponentData(human, new Position{
+                Value = new float3(position.x, 0.0f, position.y)
+            });
+
+            if (counter <= Settings.ZombieCount)
+            {
+                // Initial zombies infection of the population.
+                entityManager.SetComponentData(human, new Human{
+                    IsInfected = 1, TimeTillNextDirectionChange = 15 * Random.value
+                });
+                counter++;
+                continue;    
+            }
+            entityManager.SetComponentData(human, new Human{
+                IsInfected = 0, TimeTillNextDirectionChange = 15 * Random.value
+            });
+        }
 
         humans.Dispose();
     }
     
     private static void CreateZombies(EntityManager entityManager)
-    {
-        var zombies = new NativeArray<Entity>(Settings.ZombieCount, Allocator.Temp);
+    {        
+        var zombies = new NativeArray<Entity>(Settings.HumanCount, Allocator.Temp);
         
         entityManager.CreateEntity(ZombieArchetype, zombies);
-        foreach (var zombie in zombies) { SetupHumanoidEntity(
-            entityManager, zombie, Settings.ZombieSpeed, ZombieLook
-        ); }
+        foreach (var zombie in zombies)
+        {     
+            SetupHumanoidEntity(
+                entityManager, zombie, 0, ZombieLook
+            );
+            var position = EntityUtil.GetOffScreenLocation();
+            entityManager.SetComponentData(zombie, new Zombie{
+                TargetIndex = -1
+            });
+            entityManager.SetComponentData(zombie, new Position{
+                Value = new float3(position.x, 0.0f, position.y)
+            });
+        }
 
         zombies.Dispose();
     }
 
-    private static void SetupHumanoidEntity(EntityManager entityManager, Entity entity, float moveSpeed, MeshInstanceRenderer renderer)
+    private static void SetupHumanoidEntity(EntityManager entityManager, Entity entity, float velocity, MeshInstanceRenderer renderer)
     {
-        var position = ComputeSpawnLocation();
-        entityManager.SetComponentData(entity, new Position{
-            Value = new float3(position.x, 0.0f, position.y)
-        });
         entityManager.SetComponentData(entity, new Rotation{
             Value = Quaternion.identity
         });
-        entityManager.SetComponentData(entity, new Position2D { Value = position });
-        entityManager.SetComponentData(entity, new Heading2D { Value = new float2(1.0f, 0.0f) });
-        entityManager.SetComponentData(entity, new MoveSpeed { speed = moveSpeed });
+        entityManager.SetComponentData(entity, new Heading{
+            Value = new float2((Random.value - 0.5f) * 0.5f, (Random.value - 0.5f) * 0.5f)
+        });
+        entityManager.SetComponentData(entity, new Velocity{
+            Value = velocity
+        });
 
         entityManager.AddSharedComponentData(entity, renderer);        
     }
@@ -108,18 +147,16 @@ public class ZombieSimulatorBootstrap
     private static void DefineArchetypes(EntityManager entityManager)
     {
         HumanArchetype = entityManager.CreateArchetype(typeof(Human),
+                                                       typeof(Heading),
                                                        typeof(Position),
                                                        typeof(Rotation),
-                                                       typeof(Heading2D),
-                                                       typeof(MoveSpeed),
-                                                       typeof(Position2D));
+                                                       typeof(Velocity));
 
         ZombieArchetype = entityManager.CreateArchetype(typeof(Zombie),
+                                                        typeof(Heading),
                                                         typeof(Position),
                                                         typeof(Rotation),
-                                                        typeof(Heading2D),
-                                                        typeof(MoveSpeed),
-                                                        typeof(Position2D));
+                                                        typeof(Velocity));
     }
 
     private static MeshInstanceRenderer GetLookFromPrototype(string protoName)

@@ -3,159 +3,91 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
-using UnityEngine;
 using Unity.Burst;
 
-[UpdateAfter(typeof(HumanToZombieSystem))]
 [UpdateAfter(typeof(HumanNavigationSystem))]
 class ZombieTargetingSystem : JobComponentSystem
 {
-    [Inject] private ZombieTargetingData zombieTargetingData;
-    [Inject] private HumanTargetingData humanTargetingData;
-
-
-    public NativeList<Human> Humans;
-    public NativeList<Position2D> HumanPositions;
-
+    private ComponentGroup zombieDataGroup;
+    private ComponentGroup zombieTargetGroup;
+    
     protected override void OnStartRunning()
     {
-        Humans = new NativeList<Human>(Allocator.Persistent);
-        HumanPositions = new NativeList<Position2D>(Allocator.Persistent);
-    }
-    
-    protected override void OnStopRunning()
-    {
-        HumanPositions.Dispose();
-        Humans.Dispose();
+        zombieDataGroup = GetComponentGroup(typeof(Zombie), typeof(Heading), typeof(Position));
+        zombieTargetGroup = GetComponentGroup(typeof(Human), typeof(Heading), typeof(Position));
     }
 
     protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
-        inputDeps.Complete();
+        var zombieData = zombieDataGroup.GetComponentDataArray<Zombie>();
+        var zombiePosition = zombieDataGroup.GetComponentDataArray<Position>();
+        
+        var humanData = zombieTargetGroup.GetComponentDataArray<Human>();
+        var humanPosition = zombieTargetGroup.GetComponentDataArray<Position>();
 
-        Humans.ResizeUninitialized(humanTargetingData.Length);
-        HumanPositions.ResizeUninitialized(humanTargetingData.Length);
-
-        for (int i = 0; i < humanTargetingData.Length; i++)
-        {
-            Humans[i] = humanTargetingData.Humans[i];
-            HumanPositions[i] = humanTargetingData.Positions[i];
-        }
-
-        var copyJob = new CopyHumansToNativeListJob
-        {
-            HumanTargetingData = this.humanTargetingData,
-            Humans = this.Humans,
-            HumanPositions = this.HumanPositions
+        var zombieTargetJob = new ZombieTargetingJob{
+            zombieData = zombieData,
+            humansData = humanData,
+            humanPositions = humanPosition,
+            zombiePositions = zombiePosition
         };
 
-        inputDeps = copyJob.Schedule(humanTargetingData.Length, 64, inputDeps);
-
-        var job = new ZombieTargetingJob
-        {
-            zombieTargetingData = zombieTargetingData,
-            Humans = Humans,
-            HumanPositions = HumanPositions,
-            dt = Time.deltaTime
-        };
-
-        return job.Schedule(zombieTargetingData.Length, 64, inputDeps);
-    }
-}
-
-[BurstCompile]
-public struct CopyHumansToNativeListJob : IJobParallelFor
-{
-    [ReadOnly]
-    public HumanTargetingData HumanTargetingData;
-
-    public NativeArray<Human> Humans;
-    public NativeArray<Position2D> HumanPositions;
-
-    public void Execute(int index)
-    {
-        Humans[index] = HumanTargetingData.Humans[index];
-        HumanPositions[index] = HumanTargetingData.Positions[index];
+        // Note: Towards the end of the simulation this slows down.
+        // It is feasible to swap the length source as humans die off.
+        
+        return zombieTargetJob.Schedule(
+            zombieData.Length, 64, inputDeps
+        );
     }
 }
 
 [BurstCompile]
 public struct ZombieTargetingJob : IJobParallelFor
 {
-    public ZombieTargetingData zombieTargetingData;
-
+    public ComponentDataArray<Zombie> zombieData;
+    
     [ReadOnly]
-    public NativeArray<Human> Humans;
+    public ComponentDataArray<Human> humansData;
     [ReadOnly]
-    public NativeArray<Position2D> HumanPositions;
-
-    public float dt;
+    public ComponentDataArray<Position> humanPositions;
+    [ReadOnly]
+    public ComponentDataArray<Position> zombiePositions;
 
     public void Execute(int index)
     {
-        var zombie = zombieTargetingData.Zombie[index];
+        var zombie = zombieData[index];
+        
         if (zombie.BecomeActive != 1)
             return;
 
-        if (zombie.HumanTargetIndex != -1)
+        // Note: Awkward part: What if human is destroyed and
+        // the system shuffles the index values around, aka
+        // we can not trust the index values as used here.
+        
+        if (zombie.TargetIndex != -1)
         {
-            var human = Humans[zombie.HumanTargetIndex];
-            if (human.IsInfected != 1)
-            {
-                return;
-            }
+            var human = humansData[zombie.TargetIndex];
+            if (human.IsInfected != 1) return;
         }
-
-        float2 zombiePosition = zombieTargetingData.Position[index].Value;
-        bool foundOne = false;
-        float nearestDistance = float.MaxValue;
-
-        int humanTargetIndex = -1;
-
-        for (int i = 0; i < Humans.Length; i++)
+        
+        var idx = -1;
+        var distance = float.MaxValue;
+        var position = zombiePositions[index].Value.xz;
+        for (var i = 0; i < humansData.Length; i++)
         {
-            var human = Humans[i];
+            var human = humansData[i];
             if (human.IsInfected == 1)
                 continue;
 
-            foundOne = true;
-
-            float2 humanPosition = HumanPositions[i].Value;
-            float distSquared = math.distance(humanPosition, zombiePosition);
-
-            if (distSquared < nearestDistance)
-            {
-                nearestDistance = distSquared;
-                humanTargetIndex = i;
-            }
-
-            //if (distSquared < 5)
-            //    break;
+            var distSquared = math.distance(
+                position, humanPositions[i].Value.xz
+            );
+            if (!(distSquared < distance)) continue;
+            distance = distSquared;
+            idx = i;
         }
 
-        if (foundOne)
-        {
-            zombie.HumanTargetIndex = humanTargetIndex;
-            zombieTargetingData.Zombie[index] = zombie;
-        }
-        else
-        {
-            zombie.HumanTargetIndex = -1;
-            zombieTargetingData.Zombie[index] = zombie;
-        }
+        zombie.TargetIndex = idx;
+        zombieData[index] = zombie;
     }
-}
-
-public struct ZombieTargetingData
-{
-    public readonly int Length;
-    [ReadOnly] public ComponentDataArray<Position2D> Position;
-    public ComponentDataArray<Zombie> Zombie;
-}
-
-public struct HumanTargetingData
-{
-    public readonly int Length;
-    [ReadOnly] public ComponentDataArray<Position2D> Positions;
-    [ReadOnly] public ComponentDataArray<Human> Humans;
 }

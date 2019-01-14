@@ -1,25 +1,21 @@
-﻿using Unity.Entities;
+﻿
+using Unity.Entities;
 using Unity.Mathematics;
 
 public class EntityUtil
 {
-    public static float2 GetOffScreenLocation()
+    public static float3 GetOffScreenLocation()
     {
-        return new float2(100, 100);
+        return new float3(1000.0f, 1000.0f, 1000.0f);
     }
 }
 
-public struct Position2D : IComponentData
+public struct Heading : IComponentData
 {
     public float2 Value;
 }
 
-public struct Heading2D : IComponentData
+public struct Velocity : IComponentData
 {
-    public float2 Value;
-}
-
-public struct MoveSpeed : IComponentData
-{
-    public float speed;
+    public float Value;
 }
