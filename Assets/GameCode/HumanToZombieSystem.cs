@@ -1,79 +1,28 @@
 ﻿using Unity.Entities;
-using Unity.Jobs;
-using Unity.Transforms;
-using Unity.Burst;
 
 [UpdateAfter(typeof(HumanInfectionSystem))]
-class HumanToZombieSystem : JobComponentSystem
+class HumanToZombieSystem : ComponentSystem
 {
-    private ComponentGroup humanDataGroup;
-    private ComponentGroup zombieDataGroup;
+    private ComponentGroup infectedDataGroup;
     
     protected override void OnStartRunning()
     {
-        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Velocity), typeof(Position));
-        zombieDataGroup = GetComponentGroup(typeof(Zombie));
+        infectedDataGroup = GetComponentGroup(typeof(Infected));
     }
 
-    protected override JobHandle OnUpdate(JobHandle inputDeps)
+    protected override void OnUpdate()
     {
-        var humanData = humanDataGroup.GetComponentDataArray<Human>();
-        var humanPositions = humanDataGroup.GetComponentDataArray<Position>();
-        var humanVelocities = humanDataGroup.GetComponentDataArray<Velocity>();
+        // Note: The only reason this is here is because,
+        // MeshInstanceRenderer can not be used inside jobs.
         
-        var zombieData = zombieDataGroup.GetComponentDataArray<Zombie>();
-        
-        var toZombieJob = new HumanToZombieJob{
-            humanData = humanData,
-            zombieData = zombieData,
-            humanPositions = humanPositions,
-            humanVelocities = humanVelocities
-        };
+        var zombieLook = ZombieSimulatorBootstrap.ZombieLook;
+        var infectedEntities = infectedDataGroup.GetEntityArray();
 
-        return toZombieJob.Schedule(
-            humanData.Length, 64, inputDeps
-        );
-    }
-}
-
-[BurstCompile]
-public struct HumanToZombieJob : IJobParallelFor
-{
-    public ComponentDataArray<Human> humanData;
-    public ComponentDataArray<Zombie> zombieData;
-
-    public ComponentDataArray<Position> humanPositions;
-    public ComponentDataArray<Velocity> humanVelocities;
-
-    public void Execute(int index)
-    {
-        var human = humanData[index];
-        
-        if (human.IsInfected != 1)
-            return;
-        if (human.WasConverted != 0)
-            return;
-
-        // Note: Awkward part: Assumes that there is a zombie
-        // for every human and that this zombie is not active.
-        // It also depends on array indices as key's, bad form.
-        
-        var position = humanPositions[index];
-        var originalPosition = position.Value;
-
-        position.Value = EntityUtil.GetOffScreenLocation();
-        humanPositions[index] = position;
-
-        var zombie = zombieData[index];
-        zombie.BecomeActive = 1;
-        zombie.BecomeZombiePosition = originalPosition.xz;
-        zombieData[index] = zombie;
-
-        var velocity = humanVelocities[index];
-        velocity.Value = 0;
-        humanVelocities[index] = velocity;
-
-        human.WasConverted = 1;
-        humanData[index] = human;
+        for (var i = 0; i <infectedEntities.Length; i++)
+        {
+            var entity = infectedEntities[i];
+            PostUpdateCommands.RemoveComponent<Infected>(entity);
+            PostUpdateCommands.SetSharedComponent(entity, zombieLook);
+        }
     }
 }

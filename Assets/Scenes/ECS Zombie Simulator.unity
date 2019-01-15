@@ -233,8 +233,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5a21cd627d80c4b4a9b41c1c1b4a3165, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  HumanCount: 15000
-  ZombieCount: 5
+  HumanCount: 25000
+  ZombieCount: 10
   HumanSpeed: 6
   ZombieSpeed: 6
   InfectionDistance: 1

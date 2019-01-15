@@ -5,49 +5,102 @@ using Unity.Mathematics;
 using Unity.Transforms;
 using Unity.Burst;
 
-[UpdateAfter(typeof(HumanNavigationSystem))]
+[UpdateAfter(typeof(HumanInfectionSystem))]
 class ZombieTargetingSystem : JobComponentSystem
 {
+    private ComponentGroup humanDataGroup;
     private ComponentGroup zombieDataGroup;
-    private ComponentGroup zombieTargetGroup;
     
+    private NativeHashMap<int, int> humanIndexMap;
+
     protected override void OnStartRunning()
     {
-        zombieDataGroup = GetComponentGroup(typeof(Zombie), typeof(Heading), typeof(Position));
-        zombieTargetGroup = GetComponentGroup(typeof(Human), typeof(Heading), typeof(Position));
+        humanIndexMap = new NativeHashMap<int, int>(
+            ZombieSettings.Instance.HumanCount, Allocator.Persistent
+        );
+        
+        // Select all human and zombie positions of objects tagged as active
+        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Active), typeof(Position));
+        zombieDataGroup = GetComponentGroup(typeof(Zombie), typeof(Active), typeof(Target), typeof(Position));
+    }
+
+    protected override void OnStopRunning()
+    {
+        humanIndexMap.Dispose();
     }
 
     protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
-        var zombieData = zombieDataGroup.GetComponentDataArray<Zombie>();
-        var zombiePosition = zombieDataGroup.GetComponentDataArray<Position>();
+        var humanEntities = humanDataGroup.GetEntityArray();
+        var humanPositions = humanDataGroup.GetComponentDataArray<Position>();
         
-        var humanData = zombieTargetGroup.GetComponentDataArray<Human>();
-        var humanPosition = zombieTargetGroup.GetComponentDataArray<Position>();
+        var zombieTargets = zombieDataGroup.GetComponentDataArray<Target>();
+        var zombiePositions = zombieDataGroup.GetComponentDataArray<Position>();
 
-        var zombieTargetJob = new ZombieTargetingJob{
-            zombieData = zombieData,
-            humansData = humanData,
-            humanPositions = humanPosition,
-            zombiePositions = zombiePosition
+        var mapClearJob = new MapClearJob{
+            humanIndexMap = humanIndexMap
         };
-
-        // Note: Towards the end of the simulation this slows down.
-        // It is feasible to swap the length source as humans die off.
+        var mapEntitiesJob = new MapEntitiesJob{
+            humanEntities = humanEntities,
+            humanIndexMap = humanIndexMap.ToConcurrent()
+        };
+        var zombieTargetJob = new ZombieTargetingJob{
+            zombieTargets = zombieTargets,
+            humanEntities = humanEntities,
+            humanIndexMap = humanIndexMap,
+            humanPositions = humanPositions,
+            zombiePositions = zombiePositions
+        };
         
-        return zombieTargetJob.Schedule(
-            zombieData.Length, 64, inputDeps
+        inputDeps = JobHandle.CombineDependencies(
+            inputDeps, mapClearJob.Schedule()
         );
+        inputDeps = mapEntitiesJob.Schedule(
+            humanEntities.Length, 64, inputDeps
+        );
+        return zombieTargetJob.Schedule(
+            zombieTargets.Length, 64, inputDeps
+        );
+    }
+    
+    [BurstCompile]
+    private struct MapClearJob : IJob
+    {
+        public NativeHashMap<int, int> humanIndexMap;
+    
+        public void Execute()
+        {
+            // ToDo This feels wrong, but when doing this on main it takes 1.0ms
+            // It also needs jobs schedule around it, as it executed now it is a gap.
+            humanIndexMap.Clear();
+        }
+    }
+}
+
+[BurstCompile]
+public struct MapEntitiesJob : IJobParallelFor
+{
+    [ReadOnly]
+    public EntityArray humanEntities;
+    
+    public NativeHashMap<int, int>.Concurrent humanIndexMap;
+    
+    public void Execute(int index)
+    {
+        var key = humanEntities[index].GetHashCode();
+        humanIndexMap.TryAdd(key, index);
     }
 }
 
 [BurstCompile]
 public struct ZombieTargetingJob : IJobParallelFor
 {
-    public ComponentDataArray<Zombie> zombieData;
+    public ComponentDataArray<Target> zombieTargets;
     
     [ReadOnly]
-    public ComponentDataArray<Human> humansData;
+    public EntityArray humanEntities;
+    [ReadOnly]
+    public NativeHashMap<int, int> humanIndexMap;
     [ReadOnly]
     public ComponentDataArray<Position> humanPositions;
     [ReadOnly]
@@ -55,30 +108,30 @@ public struct ZombieTargetingJob : IJobParallelFor
 
     public void Execute(int index)
     {
-        var zombie = zombieData[index];
-        
-        if (zombie.BecomeActive != 1)
-            return;
+        var target = zombieTargets[index];
 
-        // Note: Awkward part: What if human is destroyed and
-        // the system shuffles the index values around, aka
-        // we can not trust the index values as used here.
+        // Note: Temp zombie disable
+        if (target.entity == -2)
+            return;
         
-        if (zombie.TargetIndex != -1)
+        if (target.entity != -1)
         {
-            var human = humansData[zombie.TargetIndex];
-            if (human.IsInfected != 1) return;
+            if (humanIndexMap.TryGetValue(target.entity, out var i))
+            {
+                target.position = humanPositions[i].Value.xz;
+                zombieTargets[index] = target;
+                return;
+            }
         }
+        
+        // Note: Add some spatial query system;
+        // a simple Spatial Map, a QuadTree ...
         
         var idx = -1;
         var distance = float.MaxValue;
         var position = zombiePositions[index].Value.xz;
-        for (var i = 0; i < humansData.Length; i++)
+        for (var i = 0; i < humanPositions.Length; i++)
         {
-            var human = humansData[i];
-            if (human.IsInfected == 1)
-                continue;
-
             var distSquared = math.distance(
                 position, humanPositions[i].Value.xz
             );
@@ -87,7 +140,17 @@ public struct ZombieTargetingJob : IJobParallelFor
             idx = i;
         }
 
-        zombie.TargetIndex = idx;
-        zombieData[index] = zombie;
+        if (-1 == idx || 15 < distance)
+        {
+            // Note: Temp zombie disable,
+            // works because hash is >= 0.
+            target.entity = -2;
+            zombieTargets[index] = target;
+            return;
+        }
+
+        target.entity = humanEntities[idx].GetHashCode();
+        target.position = humanPositions[idx].Value.xz;
+        zombieTargets[index] = target;
     }
 }

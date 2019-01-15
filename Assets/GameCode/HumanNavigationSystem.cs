@@ -1,11 +1,9 @@
-﻿using Unity.Collections;
-using Unity.Entities;
+﻿using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using Unity.Burst;
 
-[UpdateAfter(typeof(HumanToZombieSystem))]
 class HumanNavigationSystem : JobComponentSystem
 {
     private long headingSeed;
@@ -15,7 +13,8 @@ class HumanNavigationSystem : JobComponentSystem
     protected override void OnStartRunning()
     {
         headingSeed = (long)(long.MaxValue * UnityEngine.Random.value);
-        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Heading));
+        // Collect all entities tagged as human and with an heading and timeout component.
+        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Heading), typeof(Timeout));
     }
 
     protected override JobHandle OnUpdate(JobHandle inputDeps)
@@ -25,84 +24,56 @@ class HumanNavigationSystem : JobComponentSystem
         x ^= x << 13; x ^= x >> 7; x ^= x << 17;
         headingSeed = x;
 
-        var humans = humanDataGroup.GetComponentDataArray<Human>();
+        var timeouts = humanDataGroup.GetComponentDataArray<Timeout>();
         var headings = humanDataGroup.GetComponentDataArray<Heading>();
         
-        var directions = new NativeArray<float2>(
-            headings.Length, Allocator.TempJob
-        );
-        
-        var directionsJob = new RandDirectionsJob{
-            seed = headingSeed,
-            directions = directions
-        };
         var navigationJob = new HumanNavigationJob{
+            sd = headingSeed,
             dt = Time.deltaTime,
-            humans = humans,
             headings = headings,
-            directions = directions
-            
+            timeouts = timeouts            
         };
         
-        var jobHandle = directionsJob.Schedule(
-            directions.Length, 64, inputDeps
-        );
         return navigationJob.Schedule(
-            headings.Length, 64, jobHandle
+            headings.Length, 64, inputDeps
         );
-    }
-
-    [BurstCompile]
-    private struct RandDirectionsJob : IJobParallelFor
-    {
-        [ReadOnly]
-        public long seed;
-    
-        public NativeArray<float2> directions;
-
-        public void Execute(int index)
-        {
-            var x = (seed * index) + seed;
-            // Randomize shared seed and round it.
-            x ^= x << 13; x ^= x >> 7; x ^= x << 17;
-            var val = new double2((int)x, (int)(x >> 32));
-            directions[index] = (float2) ((val + CMi) / CMui);
-        }
-    
-        private const double CMi = 2147483646.0;
-        private const double CMui = 4294967293.0;
     }
 
     [BurstCompile]
     private struct HumanNavigationJob : IJobParallelFor
     {
+        public long sd;
         public float dt;
-
-        [DeallocateOnJobCompletionAttribute]
-        public NativeArray<float2> directions;
         
-        public ComponentDataArray<Human> humans;
         public ComponentDataArray<Heading> headings;
+        public ComponentDataArray<Timeout> timeouts;
 
         public void Execute(int index)
         {
-            // Note: It seems this split is not needed,
-            // the goal is to pack related data in memory.
-            // Why is the countdown timer in an other array?
-            // The reason Heading and old movement was removed?
+            var timeout = timeouts[index];
             
-            var human = humans[index];
-            human.TimeTillNextDirectionChange -= dt;
+            timeout.Value -= dt;
+            if (timeout.Value > 0)
+            { timeouts[index] = timeout; return; }
             
-            if (human.TimeTillNextDirectionChange > 0)
-            { humans[index] = human; return; }
-            
-            human.TimeTillNextDirectionChange = 5;
-            humans[index] = human;
+            var x = ((sd * index) << 15) + sd;
+            // Randomize shared seed and round it.
+            x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+            var val = new double2((int)x, (int)(x >> 32));
+
+            timeout.Value = (float)(7.5 * (val.x+val.y));
+            timeouts[index] = timeout;
+
+            var rounded = (((val + CMi) / CMui) - 0.5) * 0.5;
+            var direction = math.normalize(rounded);
             
             var heading = headings[index];
-            heading.Value = (directions[index] - 0.5f) * 0.5f;
+            heading.Angle = (float)math.atan2(direction.x, direction.y);
+            heading.Value = (float2)rounded;
             headings[index] = heading;
         }
+        
+        private const double CMi = 2147483646.0;
+        private const double CMui = 4294967293.0;
     }
 }

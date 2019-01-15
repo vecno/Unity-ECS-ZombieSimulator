@@ -1,6 +1,4 @@
-﻿
-using Unity.Entities;
-using Unity.Mathematics;
+﻿using Unity.Mathematics;
 
 public class EntityUtil
 {
@@ -8,14 +6,4 @@ public class EntityUtil
     {
         return new float3(1000.0f, 1000.0f, 1000.0f);
     }
-}
-
-public struct Heading : IComponentData
-{
-    public float2 Value;
-}
-
-public struct Velocity : IComponentData
-{
-    public float Value;
 }

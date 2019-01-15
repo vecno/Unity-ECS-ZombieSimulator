@@ -1,8 +1,0 @@
-﻿using Unity.Entities;
-
-public struct Human : IComponentData
-{
-    public float TimeTillNextDirectionChange;
-    public int IsInfected;
-    public int WasConverted;
-}
