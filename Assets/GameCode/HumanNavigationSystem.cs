@@ -56,20 +56,19 @@ class HumanNavigationSystem : JobComponentSystem
             if (timeout.Value > 0)
             { timeouts[index] = timeout; return; }
             
-            var x = ((sd * index) << 15) + sd;
+            var x = ((sd + index) << 15) + sd;
             // Randomize shared seed and round it.
             x ^= x << 13; x ^= x >> 7; x ^= x << 17;
             var val = new double2((int)x, (int)(x >> 32));
-
-            timeout.Value = (float)(7.5 * (val.x+val.y));
+            // The goal here is to get a rand vector with values from -1 to +1.
+            var direction = math.normalize(((val + CMi) / CMui - 0.5) * 2.0);
+            
+            timeout.Value = 2.5f + (float)math.abs(7.5 * direction.x);
             timeouts[index] = timeout;
 
-            var rounded = (((val + CMi) / CMui) - 0.5) * 0.5;
-            var direction = math.normalize(rounded);
-            
             var heading = headings[index];
             heading.Angle = (float)math.atan2(direction.x, direction.y);
-            heading.Value = (float2)rounded;
+            heading.Value = (float2)direction;
             headings[index] = heading;
         }
         
