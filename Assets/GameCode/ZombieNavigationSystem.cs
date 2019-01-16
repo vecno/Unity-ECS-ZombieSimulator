@@ -11,22 +11,22 @@ class ZombieNavigationSystem : JobComponentSystem
     private ComponentGroup zombieDataGroup;
     protected override void OnStartRunning()
     {
-        zombieDataGroup = GetComponentGroup(typeof(Zombie), typeof(Target), typeof(Heading), typeof(Velocity), typeof(Position));
+        zombieDataGroup = GetComponentGroup(typeof(Zombie), typeof(Target), typeof(Heading), typeof(Velocity), typeof(Transform));
     }
 
     protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
         var zombieTargets = zombieDataGroup.GetComponentDataArray<Target>();
         var zombieHeadings = zombieDataGroup.GetComponentDataArray<Heading>();
-        var zombiePositions = zombieDataGroup.GetComponentDataArray<Position>();
         var zombieVelocities = zombieDataGroup.GetComponentDataArray<Velocity>();
+        var zombieTransforms = zombieDataGroup.GetComponentDataArray<Transform>();
 
         var navigationJob = new ZombieNavigationJob{
             zombieSpeed = ZombieSettings.Instance.ZombieSpeed,
             zombieTargets = zombieTargets,
             zombieHeadings = zombieHeadings,
-            zombiePositions = zombiePositions,
-            zombieVelocities = zombieVelocities
+            zombieVelocities = zombieVelocities,
+            zombieTransforms = zombieTransforms
         };
 
         return navigationJob.Schedule(
@@ -46,14 +46,14 @@ public struct ZombieNavigationJob : IJobParallelFor
     [ReadOnly]
     public ComponentDataArray<Target> zombieTargets;
     [ReadOnly]
-    public ComponentDataArray<Position> zombiePositions;
+    public ComponentDataArray<Transform> zombieTransforms;
 
     public void Execute(int index)
     {
         var target = zombieTargets[index];
         var velocity = zombieVelocities[index];
         
-        if (target.entity < -0)
+        if (target.Entity < -0)
         {
             velocity.Value = 0;
             zombieVelocities[index] = velocity;
@@ -63,8 +63,8 @@ public struct ZombieNavigationJob : IJobParallelFor
         velocity.Value = zombieSpeed;
         zombieVelocities[index] = velocity;   
         
-        var from = zombiePositions[index].Value.xz;
-        var direction = math.normalize(target.position - from);
+        var from = zombieTransforms[index].Position;
+        var direction = math.normalize(target.Position - from);
 
         var heading = zombieHeadings[index];
         heading.Angle = math.atan2(direction.x, direction.y);

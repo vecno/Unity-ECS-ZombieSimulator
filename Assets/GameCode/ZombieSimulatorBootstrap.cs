@@ -11,12 +11,14 @@ public class ZombieSimulatorBootstrap
     public static ZombieSettings Settings { get; private set; }
 
     public static MeshInstanceRenderer HumanLook { get; private set; }
-    public static EntityArchetype HumanArchetype { get; private set; }
-
     public static MeshInstanceRenderer ZombieLook { get; private set; }
+
+    public static EntityArchetype HumanArchetype { get; private set; }
+    public static EntityArchetype HumanRenderArchetype { get; private set; }
     
     public static EntityArchetype ZombieArchetype { get; private set; }
-
+    public static EntityArchetype ZombieRenderArchetype { get; private set; }
+    
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     public static void Initialize()
     {
@@ -48,52 +50,79 @@ public class ZombieSimulatorBootstrap
     
     private static void CreateHumans(EntityManager entityManager)
     {
+        var logic = new NativeArray<Entity>(Settings.HumanCount, Allocator.Temp);
         var humans = new NativeArray<Entity>(Settings.HumanCount, Allocator.Temp);
-        entityManager.CreateEntity(HumanArchetype, humans);
+        var zombies = new NativeArray<Entity>(Settings.HumanCount, Allocator.Temp);
 
-        foreach (var human in humans)
-        { SetupHumanoidEntity(entityManager, human, HumanLook); }
-        
+        entityManager.CreateEntity(HumanArchetype, logic);
+        entityManager.CreateEntity(HumanRenderArchetype, humans);
+        entityManager.CreateEntity(ZombieRenderArchetype, zombies);
+        SetupHumanoidEntity(entityManager, logic, humans, zombies, true);
+
+        logic.Dispose();
         humans.Dispose();
+        zombies.Dispose();
     }
     
     private static void CreateZombies(EntityManager entityManager)
     {
+        var logic = new NativeArray<Entity>(Settings.ZombieCount, Allocator.Temp);
+        var humans = new NativeArray<Entity>(Settings.ZombieCount, Allocator.Temp);
         var zombies = new NativeArray<Entity>(Settings.ZombieCount, Allocator.Temp);
-        entityManager.CreateEntity(ZombieArchetype, zombies);
-        
-        foreach (var zombie in zombies)
-        { SetupHumanoidEntity(entityManager, zombie, ZombieLook); }
-        
+
+        entityManager.CreateEntity(ZombieArchetype, logic);
+        entityManager.CreateEntity(HumanRenderArchetype, humans);
+        entityManager.CreateEntity(ZombieRenderArchetype, zombies);
+        SetupHumanoidEntity(entityManager, logic, humans, zombies, false);
+
+        logic.Dispose();
+        humans.Dispose();
         zombies.Dispose();
     }
 
-    private static void SetupHumanoidEntity(EntityManager entityManager, Entity entity, MeshInstanceRenderer renderer)
-    {
-        var heading = math.normalize(new float2(
-            (Random.value - 0.5f) * 2.0f, (Random.value - 0.5f) * 2.0f
-        ));
-        var angle = math.atan2(heading.x, heading.y);
-        var rotation = Quaternion.AngleAxis(
-            angle * Mathf.Rad2Deg, Vector3.up
-        );
-        entityManager.SetComponentData(entity, new Heading{
-            Angle = angle,
-            Value = heading
-        });
-        entityManager.SetComponentData(entity, new Timeout{
-            Value = 15.0f * Random.value
-        });
-        entityManager.SetComponentData(entity, new Position{
-            Value = ComputeSpawnLocation()
-        });
-        entityManager.SetComponentData(entity, new Rotation{
-            Value = rotation
-        });
-        entityManager.SetComponentData(entity, new Velocity{
-            Value = 6
-        });
-        entityManager.SetSharedComponentData(entity, renderer);        
+    private static void SetupHumanoidEntity(
+        EntityManager entityManager, NativeArray<Entity> logic,
+        NativeArray<Entity> humans, NativeArray<Entity> zombies, bool isHuman
+    ) {
+        var hpos = isHuman ? .5f : -.5f;
+        var zpos = isHuman ? -.5f : .5f;
+        var sval = isHuman ? Settings.HumanSpeed : Settings.ZombieSpeed;
+        for (var i = 0; i < logic.Length; i++)
+        {
+            var dir = (new float2(Random.value, Random.value) - 0.5f) * 2.0f;
+            var nrm = math.normalize(dir);
+            var angle = math.atan2(nrm.x, nrm.y);
+            var rotation = Quaternion.AngleAxis(angle * Mathf.Rad2Deg, Vector3.up);
+            var position = ComputeSpawnLocation();
+
+            var le = logic[i];
+            var he = humans[i];
+            var ze = zombies[i];
+            
+            entityManager.SetComponentData(le, new Heading{ Angle = angle, Value = dir });
+            entityManager.SetComponentData(le, new Timeout{ Value = 15.0f * Random.value });
+            entityManager.SetComponentData(le, new Velocity{ Value = sval });
+            entityManager.SetComponentData(le, new Renderer{
+                Value = { x = hpos, y = zpos }, 
+                
+            });
+            entityManager.SetComponentData(le, new Transform{
+                Position = { x = position.x, y = position.z },
+                Rotation = { x = rotation.y, y = rotation.w }
+            });
+
+            position.y = zpos;
+            entityManager.SetComponentData(ze, new Owner{ Entity = le.GetHashCode() });
+            entityManager.SetComponentData(ze, new Position{ Value = position });
+            entityManager.SetComponentData(ze, new Rotation{ Value = rotation });
+            entityManager.SetSharedComponentData(ze, ZombieLook);
+
+            position.y = hpos;
+            entityManager.SetComponentData(he, new Owner{ Entity = le.GetHashCode() });
+            entityManager.SetComponentData(he, new Position{ Value = position });
+            entityManager.SetComponentData(he, new Rotation{ Value = rotation });
+            entityManager.SetSharedComponentData(he, HumanLook);
+        }
     }
 
     private static float3 ComputeSpawnLocation()
@@ -114,29 +143,43 @@ public class ZombieSimulatorBootstrap
     }
 
     private static void DefineArchetypes(EntityManager entityManager)
-    {   
+    {
         HumanArchetype = entityManager.CreateArchetype(
-            typeof(Human),
-            typeof(Active),
-            typeof(Target),
-            typeof(Heading),
-            typeof(Timeout),
-            typeof(Position),
-            typeof(Rotation),
-            typeof(Velocity),
-            typeof(MeshInstanceRenderer)
+            ComponentType.Create<Human>(),
+            ComponentType.Create<Active>(),
+            ComponentType.Create<Target>(),
+            ComponentType.Create<Heading>(),
+            ComponentType.Create<Timeout>(),
+            ComponentType.Create<Renderer>(),
+            ComponentType.Create<Velocity>(),
+            ComponentType.Create<Transform>()
         );
-
         ZombieArchetype = entityManager.CreateArchetype(
-            typeof(Zombie),
-            typeof(Active),
-            typeof(Target),
-            typeof(Heading),
-            typeof(Timeout),
-            typeof(Position),
-            typeof(Rotation),
-            typeof(Velocity),
-            typeof(MeshInstanceRenderer)
+            ComponentType.Create<Zombie>(),
+            ComponentType.Create<Active>(),
+            ComponentType.Create<Target>(),
+            ComponentType.Create<Heading>(),
+            ComponentType.Create<Timeout>(),
+            ComponentType.Create<Renderer>(),
+            ComponentType.Create<Velocity>(),
+            ComponentType.Create<Transform>()
+        );
+        
+        HumanRenderArchetype = entityManager.CreateArchetype(
+            ComponentType.Create<Owner>(),
+            ComponentType.Create<Human>(),
+            ComponentType.Create<Active>(),
+            ComponentType.Create<Position>(),
+            ComponentType.Create<Rotation>(),
+            ComponentType.Create<MeshInstanceRenderer>()
+        );
+        ZombieRenderArchetype = entityManager.CreateArchetype(
+            ComponentType.Create<Owner>(),
+            ComponentType.Create<Zombie>(),
+            ComponentType.Create<Active>(),
+            ComponentType.Create<Position>(),
+            ComponentType.Create<Rotation>(),
+            ComponentType.Create<MeshInstanceRenderer>()
         );
     }
 

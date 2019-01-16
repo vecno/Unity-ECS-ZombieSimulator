@@ -13,8 +13,7 @@ class HumanNavigationSystem : JobComponentSystem
     protected override void OnStartRunning()
     {
         headingSeed = (long)(long.MaxValue * UnityEngine.Random.value);
-        // Collect all entities tagged as human and with an heading and timeout component.
-        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Heading), typeof(Timeout));
+        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Heading), typeof(Timeout), typeof(Velocity));
     }
 
     protected override JobHandle OnUpdate(JobHandle inputDeps)
@@ -26,12 +25,15 @@ class HumanNavigationSystem : JobComponentSystem
 
         var timeouts = humanDataGroup.GetComponentDataArray<Timeout>();
         var headings = humanDataGroup.GetComponentDataArray<Heading>();
+        var velocities = humanDataGroup.GetComponentDataArray<Velocity>();
         
         var navigationJob = new HumanNavigationJob{
+            sp = ZombieSimulatorBootstrap.Settings.HumanSpeed,
             sd = headingSeed,
             dt = Time.deltaTime,
             headings = headings,
-            timeouts = timeouts            
+            timeouts = timeouts,
+            velocities = velocities
         };
         
         return navigationJob.Schedule(
@@ -44,9 +46,12 @@ class HumanNavigationSystem : JobComponentSystem
     {
         public long sd;
         public float dt;
+        public float sp;
         
         public ComponentDataArray<Heading> headings;
         public ComponentDataArray<Timeout> timeouts;
+        
+        public ComponentDataArray<Velocity> velocities;
 
         public void Execute(int index)
         {
@@ -56,21 +61,24 @@ class HumanNavigationSystem : JobComponentSystem
             if (timeout.Value > 0)
             { timeouts[index] = timeout; return; }
             
-            var x = ((sd * index) << 15) + sd;
+            var x = ((sd + index) << 15) + sd;
             // Randomize shared seed and round it.
             x ^= x << 13; x ^= x >> 7; x ^= x << 17;
             var val = new double2((int)x, (int)(x >> 32));
-
-            timeout.Value = (float)(7.5 * (val.x+val.y));
+            // The goal here is to get a rand vector with values from -1 to +1.
+            var direction = math.normalize(((val + CMi) / CMui - 0.5) * 2.0);
+            
+            timeout.Value = 2.5f + (float)math.abs(7.5 * direction.x);
             timeouts[index] = timeout;
 
-            var rounded = (((val + CMi) / CMui) - 0.5) * 0.5;
-            var direction = math.normalize(rounded);
-            
             var heading = headings[index];
             heading.Angle = (float)math.atan2(direction.x, direction.y);
-            heading.Value = (float2)rounded;
+            heading.Value = (float2)direction;
             headings[index] = heading;
+
+            var velocity = velocities[index];
+            velocity.Value = sp;
+            velocities[index] = velocity;
         }
         
         private const double CMi = 2147483646.0;

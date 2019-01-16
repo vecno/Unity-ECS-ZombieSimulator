@@ -12,6 +12,8 @@ public class ZombieSettings : MonoBehaviour
 
     public Rect Playfield = new Rect { x = -30.0f, y = -30.0f, width = 60.0f, height = 60.0f };
 
+    public int EntityCount => HumanCount + ZombieCount;
+    
     public static ZombieSettings Instance { get; private set; }
     
     void Awake()
