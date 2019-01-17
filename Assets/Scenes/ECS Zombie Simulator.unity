@@ -233,10 +233,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5a21cd627d80c4b4a9b41c1c1b4a3165, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  HumanCount: 25000
+  HumanCount: 40000
   ZombieCount: 10
   HumanSpeed: 6
-  ZombieSpeed: 7
+  ZombieSpeed: 8
   InfectionDistance: 1
   Playfield:
     serializedVersion: 2
