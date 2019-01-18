@@ -6,7 +6,7 @@ using Unity.Mathematics;
 using Unity.Transforms;
 using UnityEngine;
 
-public class EntityMovementSystem : JobComponentSystem
+public class ActorMovementSystem : JobComponentSystem
 {
     private ComponentGroup baseDataGroup;
     private ComponentGroup humanDataGroup;
