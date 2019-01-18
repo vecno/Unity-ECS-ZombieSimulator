@@ -14,7 +14,7 @@ class ActorNavigationSystem : JobComponentSystem
     protected override void OnStartRunning()
     {
         headingSeed = (long)(long.MaxValue * UnityEngine.Random.value);
-        actorDataGroup = GetComponentGroup(typeof(Actor), typeof(Heading), typeof(Timeout), typeof(Velocity));
+        actorDataGroup = GetComponentGroup(typeof(Actor), typeof(Target), typeof(Heading), typeof(Timeout), typeof(Velocity), typeof(Transform));
     }
 
     protected override JobHandle OnUpdate(JobHandle inputDeps)
@@ -25,18 +25,23 @@ class ActorNavigationSystem : JobComponentSystem
         headingSeed = x;
 
         var actors = actorDataGroup.GetComponentDataArray<Actor>();
+        var targets = actorDataGroup.GetComponentDataArray<Target>();
         var timeouts = actorDataGroup.GetComponentDataArray<Timeout>();
         var headings = actorDataGroup.GetComponentDataArray<Heading>();
         var velocities = actorDataGroup.GetComponentDataArray<Velocity>();
+        var transforms = actorDataGroup.GetComponentDataArray<Transform>();
 
-        var navigationJob = new HumanNavigationJob{
+        var navigationJob = new ActorNavigationJob{
             seed = headingSeed,
-            speed = ZombieSimulatorBootstrap.Settings.HumanSpeed,
             deltaTime = Time.deltaTime,
+            humanSpeed = ZombieSimulatorBootstrap.Settings.HumanSpeed,
+            zombieSpeed = ZombieSimulatorBootstrap.Settings.ZombieSpeed,
             actors = actors,
+            targets = targets,
             headings = headings,
             timeouts = timeouts,
-            velocities = velocities
+            velocities = velocities,
+            transforms = transforms
         };
         
         return navigationJob.Schedule(
@@ -45,11 +50,12 @@ class ActorNavigationSystem : JobComponentSystem
     }
 
     [BurstCompile]
-    private struct HumanNavigationJob : IJobParallelFor
+    private struct ActorNavigationJob : IJobParallelFor
     {
         public long seed;
-        public float speed;
         public float deltaTime;
+        public float humanSpeed;
+        public float zombieSpeed;
 
         public ComponentDataArray<Heading> headings;
         public ComponentDataArray<Timeout> timeouts;
@@ -57,14 +63,39 @@ class ActorNavigationSystem : JobComponentSystem
 
         [ReadOnly]
         public ComponentDataArray<Actor> actors;
+        [ReadOnly]
+        public ComponentDataArray<Target> targets;
+        [ReadOnly]
+        public ComponentDataArray<Transform> transforms;
 
         public void Execute(int index)
         {
-            if (Actor.Type.Human != actors[index].Value)
-                return;
+            // Note: This kinda breaks DoD principles
+            // as it creates none linear memory access.
+            switch (actors[index].Value)
+            {
+                case Actor.Type.Zombie:
+                    ExecuteZombie(index);
+                    break;
+                case Actor.Type.Human:
+                    ExecuteHuman(index);
+                    break;
+                default:
+                    ExecuteNone(index);
+                    break;
+            }
+        }
 
+        private void ExecuteNone(int index)
+        {
+            var heading = headings[index];
+            heading.Value = 0;
+            headings[index] = heading;
+        }
+
+        private void ExecuteHuman(int index)
+        {
             var timeout = timeouts[index];
-
             timeout.Value -= deltaTime;
             if (timeout.Value > 0)
             { timeouts[index] = timeout; return; }
@@ -85,8 +116,32 @@ class ActorNavigationSystem : JobComponentSystem
             headings[index] = heading;
 
             var velocity = velocities[index];
-            velocity.Value = speed;
+            velocity.Value = humanSpeed;
             velocities[index] = velocity;
+        }
+
+        private void ExecuteZombie(int index)
+        {
+            var target = targets[index];
+            var velocity = velocities[index];
+
+            if (target.Entity < -0)
+            {
+                velocity.Value = 0;
+                velocities[index] = velocity;
+                return;
+            }
+
+            velocity.Value = zombieSpeed;
+            velocities[index] = velocity;   
+
+            var from = transforms[index].Position;
+            var direction = math.normalize(target.Position - from);
+
+            var heading = headings[index];
+            heading.Angle = math.atan2(direction.x, direction.y);
+            heading.Value = direction;
+            headings[index] = heading;
         }
 
         private const double CMi = 2147483646.0;
