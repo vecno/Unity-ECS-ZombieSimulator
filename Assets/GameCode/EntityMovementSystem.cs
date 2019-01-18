@@ -6,14 +6,6 @@ using Unity.Mathematics;
 using Unity.Transforms;
 using UnityEngine;
 
-// Note: This System handles position and rotation of all entities,
-// it is wise to keep it as close to the end of the stack as possible.
-// Reason: The unity render system runs after all custom systems are
-// updated and the first thing it does is update the entity transforms.
-// This makes sure that all rotation and position data is in cpu cache.
-
-//[UpdateAfter(typeof(HumanNavigationSystem))]
-//[UpdateAfter(typeof(ZombieTargetingSystem))]
 public class EntityMovementSystem : JobComponentSystem
 {
     private ComponentGroup baseDataGroup;
@@ -27,9 +19,9 @@ public class EntityMovementSystem : JobComponentSystem
         transformMap = new NativeHashMap<int, MapData>(
             ZombieSimulatorBootstrap.Settings.EntityCount, Allocator.Persistent
         );
-        baseDataGroup = GetComponentGroup(typeof(Active), typeof(Heading), typeof(Velocity), typeof(Renderer), typeof(Transform));
-        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Active), typeof(Owner), typeof(Position), typeof(Rotation));
-        zombieDataGroup = GetComponentGroup(typeof(Zombie), typeof(Active), typeof(Owner), typeof(Position), typeof(Rotation));
+        baseDataGroup = GetComponentGroup(typeof(Actor), typeof(Heading), typeof(Velocity), typeof(Renderer), typeof(Transform));
+        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Owner), typeof(Position), typeof(Rotation));
+        zombieDataGroup = GetComponentGroup(typeof(Zombie), typeof(Owner), typeof(Position), typeof(Rotation));
     }
 
     protected override void OnStopRunning()
@@ -56,7 +48,7 @@ public class EntityMovementSystem : JobComponentSystem
         inputDeps = computeTransformMap.Schedule(
             keys.Length, 64, inputDeps
         );
-        
+
         var owners = humanDataGroup.GetComponentDataArray<Owner>();
         var positions = humanDataGroup.GetComponentDataArray<Position>();
         var rotations = humanDataGroup.GetComponentDataArray<Rotation>();
@@ -96,7 +88,7 @@ public class EntityMovementSystem : JobComponentSystem
         public float2 Position;
         public float2 Rotation;
     }
-    
+
     [BurstCompile]
     private struct ClrTransformMap : IJob
     {
@@ -137,7 +129,7 @@ public class EntityMovementSystem : JobComponentSystem
             rotations[index] = rotation;
         }
     }
-    
+
     [BurstCompile]
     private struct CopyZombieTransformMap : IJobParallelFor
     {
@@ -172,7 +164,7 @@ public class EntityMovementSystem : JobComponentSystem
     private struct ComputeTransformMap : IJobParallelFor
     {
         public float dt;
-        
+
         [ReadOnly]
         public EntityArray keys;
         [ReadOnly]
@@ -181,23 +173,23 @@ public class EntityMovementSystem : JobComponentSystem
         public ComponentDataArray<Renderer> renderers;
         [ReadOnly]
         public ComponentDataArray<Velocity> velocities;
-        
+
         public ComponentDataArray<Transform> transforms;
-            
+
         public NativeHashMap<int, MapData>.Concurrent transformMap;
-        
+
         public void Execute(int index)
         {
             var heading = headings[index];
             var velocity = velocities[index];
-            
+
             var transform = transforms[index];
             transform.Position.x += heading.Value.x * velocity.Value * dt;
             transform.Position.y += heading.Value.y * velocity.Value * dt;
             transform.Rotation.x = math.sin(heading.Angle * .5f);
             transform.Rotation.y = math.cos(heading.Angle * .5f);
             transforms[index] = transform;
-            
+
             transformMap.TryAdd(keys[index].GetHashCode(), new MapData{
                 Renderer = renderers[index].Value,
                 Position = transform.Position,

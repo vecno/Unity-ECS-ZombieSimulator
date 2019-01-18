@@ -4,204 +4,195 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Burst;
 
-class HumanInfectionSystem : ComponentSystem
+class HumanInfectionSystem : JobComponentSystem
 {
-    private ComponentGroup humanDataGroup;
-    private ComponentGroup zombieDataGroup;
+    private ComponentGroup actorDataGroup;
 
-    private NativeHashMap<int, int> humanIndexMap;
-    private NativeHashMap<int, int> humanTransformMap;
+    private NativeHashMap<int, int> indicesMap;
+    private NativeHashMap<int, int> transformMap;
 
     protected override void OnStartRunning()
     {
-        humanIndexMap = new NativeHashMap<int, int>(
+        indicesMap = new NativeHashMap<int, int>(
             ZombieSettings.Instance.HumanCount, Allocator.Persistent
         );
-        humanTransformMap = new NativeHashMap<int, int>(
+        transformMap = new NativeHashMap<int, int>(
             ZombieSettings.Instance.HumanCount, Allocator.Persistent
         );
-        
-        // Select all human and zombie positions of objects tagged as active
-        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Active), typeof(Renderer), typeof(Transform));
-        zombieDataGroup = GetComponentGroup(typeof(Zombie), typeof(Active), typeof(Target), typeof(Transform));
+
+        actorDataGroup = GetComponentGroup(typeof(Actor), typeof(Target), typeof(Renderer), typeof(Transform));
     }
-    
+
     protected override void OnStopRunning()
     {
-        humanIndexMap.Dispose();
-        humanTransformMap.Dispose();
+        indicesMap.Dispose();
+        transformMap.Dispose();
     }
-    
-    protected override void OnUpdate()
+
+    protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
-        // ToDo Remove the remaining dependencies on command buffer.
-        // Try to remove all sync points from the systems, smooth frames.
-        
-        var humanEntities = humanDataGroup.GetEntityArray();
-        var humanRenderers = humanDataGroup.GetComponentDataArray<Renderer>();
-        var humanTransforms = humanDataGroup.GetComponentDataArray<Transform>();
+        var entities = actorDataGroup.GetEntityArray();
+        var actors = actorDataGroup.GetComponentDataArray<Actor>();
+        var targets = actorDataGroup.GetComponentDataArray<Target>();
+        var renderers = actorDataGroup.GetComponentDataArray<Renderer>();
+        var transforms = actorDataGroup.GetComponentDataArray<Transform>();
+
         var computeIndexMap = new ComputeIndexMap{
-            humanEntities = humanEntities,
-            humanIndexMap = humanIndexMap.ToConcurrent()
+            actors = actors,
+            entities = entities,
+            indicesMap = indicesMap.ToConcurrent()
         };
-        var inputDeps = computeIndexMap.Schedule(
-            humanEntities.Length, 64
+        inputDeps = computeIndexMap.Schedule(
+            entities.Length, 64, inputDeps
         );
-        
-        var zombieEntities = zombieDataGroup.GetEntityArray();
-        var zombieTargets = zombieDataGroup.GetComponentDataArray<Target>();
-        var zombieTransforms = zombieDataGroup.GetComponentDataArray<Transform>();
-        var humanInfectionJob = new HumanInfectionJob{
-            zombieTargets = zombieTargets,
-            humanEntities = humanEntities,
-            zombieEntities = zombieEntities,
-            
-            humanTransformMap = humanTransformMap.ToConcurrent(),
-            humanIndexMap = humanIndexMap,
-            humanTransforms = humanTransforms,
-            zombieTransforms = zombieTransforms,
-            commandBuffer = PostUpdateCommands.ToConcurrent(),
+
+        var infectionJob = new InfectionJob{
+            actors = actors,
+            targets = targets,
+            transforms = transforms,
+            indicesMap = indicesMap,
+            transformMap = transformMap.ToConcurrent(),
             infectionDistance = ZombieSettings.Instance.InfectionDistance
         };
-        inputDeps = humanInfectionJob.Schedule(
-            zombieTargets.Length, 64, inputDeps
+        inputDeps = infectionJob.Schedule(
+            targets.Length, 64, inputDeps
         );
-        
-        var humanTransformJob = new HumanTransformJob{
-            humanTransformMap = humanTransformMap,
-            humanRenderers = humanRenderers,
+
+        var transformJob = new TransformJob{
+            actors = actors,
+            renderers = renderers,
+            transformMap = transformMap
         };
-        inputDeps = humanTransformJob.Schedule(
-            humanRenderers.Length, 64, inputDeps
+        inputDeps = transformJob.Schedule(
+            renderers.Length, 64, inputDeps
         );
-        
+
         var clrIndexMap = new ClrIndexMap{
-            humanIndexMap = humanIndexMap
+            indicesMap = indicesMap
         };
         var clrTransformMap = new ClrTransformMap{
-            humanTransformMap = humanTransformMap,
+            transformMap = transformMap,
         };
-        inputDeps = JobHandle.CombineDependencies(
+        return JobHandle.CombineDependencies(
             clrIndexMap.Schedule(inputDeps),
             clrTransformMap.Schedule(inputDeps)
         );
-        
-        inputDeps.Complete();
     }
-    
+
     [BurstCompile]
     private struct ClrIndexMap : IJob
     {
-        public NativeHashMap<int, int> humanIndexMap;
+        public NativeHashMap<int, int> indicesMap;
 
         public void Execute()
-        { humanIndexMap.Clear(); }
+        { indicesMap.Clear(); }
     }
-    
+
     [BurstCompile]
     private struct ClrTransformMap : IJob
     {
-        public NativeHashMap<int, int> humanTransformMap;
+        public NativeHashMap<int, int> transformMap;
 
         public void Execute()
-        { humanTransformMap.Clear(); }
+        { transformMap.Clear(); }
     }
 
     [BurstCompile]
     private struct ComputeIndexMap : IJobParallelFor
     {
+        public NativeHashMap<int, int>.Concurrent indicesMap;
+
         [ReadOnly]
-        public EntityArray humanEntities;
-    
-        public NativeHashMap<int, int>.Concurrent humanIndexMap;
-    
+        public EntityArray entities;
+        [ReadOnly]
+        public ComponentDataArray<Actor> actors;
+
         public void Execute(int index)
         {
-            var key = humanEntities[index].GetHashCode();
-            humanIndexMap.TryAdd(key, index);
+            if (Actor.Type.Human != actors[index].Value)
+                return;
+
+            var key = entities[index].GetHashCode();
+            indicesMap.TryAdd(key, index);
         }
     }
 
-    private struct HumanTransformJob : IJobParallelFor
+    private struct TransformJob : IJobParallelFor
     {
-        public ComponentDataArray<Renderer> humanRenderers;
-     
+        public ComponentDataArray<Actor> actors;
+        public ComponentDataArray<Renderer> renderers;
+
         [ReadOnly]
-        public NativeHashMap<int, int> humanTransformMap;
-        
+        public NativeHashMap<int, int> transformMap;
+
         public void Execute(int index)
         {
-            if (!humanTransformMap.TryGetValue(index, out _))
+            if (Actor.Type.Zombie == actors[index].Value)
                 return;
 
-            var renderer = humanRenderers[index];
+            if (!transformMap.TryGetValue(index, out _))
+                return;
+
+            var actor = actors[index];
+            actor.Value = Actor.Type.Zombie;
+            actors[index] = actor;
+
+            var renderer = renderers[index];
             renderer.Value.x = -.5f;
             renderer.Value.y =  .5f;
-            humanRenderers[index] = renderer;
+            renderers[index] = renderer;
         }
     }
 
-    private struct HumanInfectionJob : IJobParallelFor
+    private struct InfectionJob : IJobParallelFor
     {
         public float infectionDistance;
-        
-        public ComponentDataArray<Target> zombieTargets;
-        
-        public EntityCommandBuffer.Concurrent commandBuffer;
-        
-        public NativeHashMap<int, int>.Concurrent humanTransformMap;
-        
+
+        public ComponentDataArray<Actor> actors;
+        public ComponentDataArray<Target> targets;
+
+        public NativeHashMap<int, int>.Concurrent transformMap;
+
         [ReadOnly]
-        public EntityArray humanEntities;
+        public NativeHashMap<int, int> indicesMap;
         [ReadOnly]
-        public EntityArray zombieEntities;
-        [ReadOnly]
-        public NativeHashMap<int, int> humanIndexMap;
-        [ReadOnly]
-        public ComponentDataArray<Transform> humanTransforms;
-        [ReadOnly]
-        public ComponentDataArray<Transform> zombieTransforms;
-    
+        public ComponentDataArray<Transform> transforms;
+
         public void Execute(int index)
         {
-            var target = zombieTargets[index];
-            
+            if (Actor.Type.Zombie != actors[index].Value)
+                return;
+
+            var target = targets[index];
+
             if (target.Entity == -1) 
                 return;
+
             if (target.Entity == -2)
             {
-                var zombie = zombieEntities[index];
-                commandBuffer.RemoveComponent<Active>(index, zombie);
-                commandBuffer.RemoveComponent<Heading>(index, zombie);
+                var actor = actors[index];
+                actor.Value = Actor.Type.None;
+                actors[index] = actor;
                 return;
             }
     
-            if (!humanIndexMap.TryGetValue(target.Entity, out var idx))
+            if (!indicesMap.TryGetValue(target.Entity, out var idx))
             {
                 target.Entity = -1;
-                zombieTargets[index] = target;
+                targets[index] = target;
                 return;
             }
     
             var distSquared = math.distance(
-                humanTransforms[idx].Position,
-                zombieTransforms[index].Position
+                transforms[idx].Position,
+                transforms[index].Position
             );
             if (infectionDistance < distSquared) 
                 return;
-    
-            // Note: Bit of a hack, just need
-            // to make sure it only happens once.
-            // ToDo: Use a native array, fast check?
-            if (humanTransformMap.TryAdd(idx, idx))
-            {
-                var human = humanEntities[idx];
-                commandBuffer.RemoveComponent<Human>(index, human);
-                commandBuffer.AddComponent(index, human, new Zombie());
-            }
 
             target.Entity = -1;
-            zombieTargets[index] = target;
+            targets[index] = target;
+            transformMap.TryAdd(idx, idx);
         }
     }
 }

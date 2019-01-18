@@ -13,10 +13,8 @@ public class ZombieSimulatorBootstrap
     public static MeshInstanceRenderer HumanLook { get; private set; }
     public static MeshInstanceRenderer ZombieLook { get; private set; }
 
-    public static EntityArchetype HumanArchetype { get; private set; }
+    public static EntityArchetype LogicArchetype { get; private set; }
     public static EntityArchetype HumanRenderArchetype { get; private set; }
-    
-    public static EntityArchetype ZombieArchetype { get; private set; }
     public static EntityArchetype ZombieRenderArchetype { get; private set; }
     
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -54,7 +52,7 @@ public class ZombieSimulatorBootstrap
         var humans = new NativeArray<Entity>(Settings.HumanCount, Allocator.Temp);
         var zombies = new NativeArray<Entity>(Settings.HumanCount, Allocator.Temp);
 
-        entityManager.CreateEntity(HumanArchetype, logic);
+        entityManager.CreateEntity(LogicArchetype, logic);
         entityManager.CreateEntity(HumanRenderArchetype, humans);
         entityManager.CreateEntity(ZombieRenderArchetype, zombies);
         SetupHumanoidEntity(entityManager, logic, humans, zombies, true);
@@ -70,7 +68,7 @@ public class ZombieSimulatorBootstrap
         var humans = new NativeArray<Entity>(Settings.ZombieCount, Allocator.Temp);
         var zombies = new NativeArray<Entity>(Settings.ZombieCount, Allocator.Temp);
 
-        entityManager.CreateEntity(ZombieArchetype, logic);
+        entityManager.CreateEntity(LogicArchetype, logic);
         entityManager.CreateEntity(HumanRenderArchetype, humans);
         entityManager.CreateEntity(ZombieRenderArchetype, zombies);
         SetupHumanoidEntity(entityManager, logic, humans, zombies, false);
@@ -86,6 +84,7 @@ public class ZombieSimulatorBootstrap
     ) {
         var hpos = isHuman ? .5f : -.5f;
         var zpos = isHuman ? -.5f : .5f;
+        var type = isHuman ? Actor.Type.Human : Actor.Type.Zombie;
         var sval = isHuman ? Settings.HumanSpeed : Settings.ZombieSpeed;
         for (var i = 0; i < logic.Length; i++)
         {
@@ -98,7 +97,8 @@ public class ZombieSimulatorBootstrap
             var le = logic[i];
             var he = humans[i];
             var ze = zombies[i];
-            
+
+            entityManager.SetComponentData(le, new Actor{ Value = type });
             entityManager.SetComponentData(le, new Heading{ Angle = angle, Value = dir });
             entityManager.SetComponentData(le, new Timeout{ Value = 15.0f * Random.value });
             entityManager.SetComponentData(le, new Velocity{ Value = sval });
@@ -144,9 +144,8 @@ public class ZombieSimulatorBootstrap
 
     private static void DefineArchetypes(EntityManager entityManager)
     {
-        HumanArchetype = entityManager.CreateArchetype(
-            ComponentType.Create<Human>(),
-            ComponentType.Create<Active>(),
+        LogicArchetype = entityManager.CreateArchetype(
+            ComponentType.Create<Actor>(),
             ComponentType.Create<Target>(),
             ComponentType.Create<Heading>(),
             ComponentType.Create<Timeout>(),
@@ -154,21 +153,9 @@ public class ZombieSimulatorBootstrap
             ComponentType.Create<Velocity>(),
             ComponentType.Create<Transform>()
         );
-        ZombieArchetype = entityManager.CreateArchetype(
-            ComponentType.Create<Zombie>(),
-            ComponentType.Create<Active>(),
-            ComponentType.Create<Target>(),
-            ComponentType.Create<Heading>(),
-            ComponentType.Create<Timeout>(),
-            ComponentType.Create<Renderer>(),
-            ComponentType.Create<Velocity>(),
-            ComponentType.Create<Transform>()
-        );
-        
         HumanRenderArchetype = entityManager.CreateArchetype(
             ComponentType.Create<Owner>(),
             ComponentType.Create<Human>(),
-            ComponentType.Create<Active>(),
             ComponentType.Create<Position>(),
             ComponentType.Create<Rotation>(),
             ComponentType.Create<MeshInstanceRenderer>()
@@ -176,7 +163,6 @@ public class ZombieSimulatorBootstrap
         ZombieRenderArchetype = entityManager.CreateArchetype(
             ComponentType.Create<Owner>(),
             ComponentType.Create<Zombie>(),
-            ComponentType.Create<Active>(),
             ComponentType.Create<Position>(),
             ComponentType.Create<Rotation>(),
             ComponentType.Create<MeshInstanceRenderer>()

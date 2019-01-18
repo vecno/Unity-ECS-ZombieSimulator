@@ -1,36 +1,37 @@
 ﻿using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
-using Unity.Transforms;
 using Unity.Mathematics;
 using Unity.Burst;
 
-[UpdateAfter(typeof(ZombieTargetingSystem))]
 class ZombieNavigationSystem : JobComponentSystem
 {
-    private ComponentGroup zombieDataGroup;
+    private ComponentGroup actorDataGroup;
+
     protected override void OnStartRunning()
     {
-        zombieDataGroup = GetComponentGroup(typeof(Zombie), typeof(Target), typeof(Heading), typeof(Velocity), typeof(Transform));
+        actorDataGroup = GetComponentGroup(typeof(Actor), typeof(Target), typeof(Heading), typeof(Velocity), typeof(Transform));
     }
 
     protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
-        var zombieTargets = zombieDataGroup.GetComponentDataArray<Target>();
-        var zombieHeadings = zombieDataGroup.GetComponentDataArray<Heading>();
-        var zombieVelocities = zombieDataGroup.GetComponentDataArray<Velocity>();
-        var zombieTransforms = zombieDataGroup.GetComponentDataArray<Transform>();
+        var actors = actorDataGroup.GetComponentDataArray<Actor>();
+        var targets = actorDataGroup.GetComponentDataArray<Target>();
+        var headings = actorDataGroup.GetComponentDataArray<Heading>();
+        var velocities = actorDataGroup.GetComponentDataArray<Velocity>();
+        var transforms = actorDataGroup.GetComponentDataArray<Transform>();
 
         var navigationJob = new ZombieNavigationJob{
-            zombieSpeed = ZombieSettings.Instance.ZombieSpeed,
-            zombieTargets = zombieTargets,
-            zombieHeadings = zombieHeadings,
-            zombieVelocities = zombieVelocities,
-            zombieTransforms = zombieTransforms
+            speed = ZombieSettings.Instance.ZombieSpeed,
+            actors = actors,
+            targets = targets,
+            headings = headings,
+            velocities = velocities,
+            transforms = transforms
         };
 
         return navigationJob.Schedule(
-            zombieTargets.Length, 64, inputDeps
+            actors.Length, 64, inputDeps
         );
     }
 }
@@ -38,37 +39,49 @@ class ZombieNavigationSystem : JobComponentSystem
 [BurstCompile]
 public struct ZombieNavigationJob : IJobParallelFor
 {
-    public float zombieSpeed;
-    
-    public ComponentDataArray<Heading> zombieHeadings;
-    public ComponentDataArray<Velocity> zombieVelocities;
- 
+    public float speed;
+
+    public ComponentDataArray<Heading> headings;
+    public ComponentDataArray<Velocity> velocities;
+
     [ReadOnly]
-    public ComponentDataArray<Target> zombieTargets;
+    public ComponentDataArray<Actor> actors;
     [ReadOnly]
-    public ComponentDataArray<Transform> zombieTransforms;
+    public ComponentDataArray<Target> targets;
+    [ReadOnly]
+    public ComponentDataArray<Transform> transforms;
 
     public void Execute(int index)
     {
-        var target = zombieTargets[index];
-        var velocity = zombieVelocities[index];
-        
+        var heading = headings[index];
+        if (Actor.Type.None == actors[index].Value)
+        {
+            heading.Value = 0;
+            headings[index] = heading;
+            return;
+        }
+
+        if (Actor.Type.Zombie != actors[index].Value)
+            return;
+
+        var target = targets[index];
+        var velocity = velocities[index];
+
         if (target.Entity < -0)
         {
             velocity.Value = 0;
-            zombieVelocities[index] = velocity;
+            velocities[index] = velocity;
             return;
         }
-        
-        velocity.Value = zombieSpeed;
-        zombieVelocities[index] = velocity;   
-        
-        var from = zombieTransforms[index].Position;
+
+        velocity.Value = speed;
+        velocities[index] = velocity;   
+
+        var from = transforms[index].Position;
         var direction = math.normalize(target.Position - from);
 
-        var heading = zombieHeadings[index];
         heading.Angle = math.atan2(direction.x, direction.y);
         heading.Value = direction;
-        zombieHeadings[index] = heading;
+        headings[index] = heading;
     }
 }

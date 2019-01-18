@@ -6,75 +6,76 @@ using Unity.Burst;
 
 class ZombieTargetingSystem : JobComponentSystem
 {
-    private ComponentGroup humanDataGroup;
-    private ComponentGroup zombieDataGroup;
+    private ComponentGroup actorDataGroup;
     
-    private NativeHashMap<int, int> humanIndexMap;
-    private NativeMultiHashMap<uint, int> humanSpacialMap;
+    private NativeHashMap<int, int> indexMap;
+    private NativeMultiHashMap<uint, int> spacialMap;
     
     protected override void OnStartRunning()
     {
-        humanIndexMap = new NativeHashMap<int, int>(
+        indexMap = new NativeHashMap<int, int>(
             ZombieSettings.Instance.HumanCount, Allocator.Persistent
         );
-        humanSpacialMap = new NativeMultiHashMap<uint, int>(
+        spacialMap = new NativeMultiHashMap<uint, int>(
             ZombieSettings.Instance.HumanCount, Allocator.Persistent
         );
-        // Select all human and zombie positions of objects tagged as active
-        humanDataGroup = GetComponentGroup(typeof(Human), typeof(Active), typeof(Transform));
-        zombieDataGroup = GetComponentGroup(typeof(Zombie), typeof(Active), typeof(Target), typeof(Transform));
+        actorDataGroup = GetComponentGroup(typeof(Actor), typeof(Target), typeof(Transform));
     }
 
     protected override void OnStopRunning()
     {
-        humanIndexMap.Dispose();
-        humanSpacialMap.Dispose();
+        indexMap.Dispose();
+        spacialMap.Dispose();
     }
 
     protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
         // Note: this is the size of the hexes on spacial map, smaller
         // values lowers the load but means less likely to find a target.
-        const float scale = 15.0f;
+        const float scale = 10.0f;
+
+        var entities = actorDataGroup.GetEntityArray();
         
-        var humanEntities = humanDataGroup.GetEntityArray();
-        var humanTransforms = humanDataGroup.GetComponentDataArray<Transform>();
+        var actors = actorDataGroup.GetComponentDataArray<Actor>();
+        var targets = actorDataGroup.GetComponentDataArray<Target>();
+        var transforms = actorDataGroup.GetComponentDataArray<Transform>();
+        
         var computeIndexMap = new ComputeIndexMap{
-            humanEntities = humanEntities,
-            humanIndexMap = humanIndexMap.ToConcurrent()
+            actors = actors,
+            entities = entities,
+            indexMap = indexMap.ToConcurrent()
         };
         var computeSpacialMap = new ComputeSpacialMap{
             scale = scale,
+            actors = actors,
             layout = EntityUtil.Layout,
-            transforms = humanTransforms,
-            spacialMap = humanSpacialMap.ToConcurrent()
+            transforms = transforms,
+            spacialMap = spacialMap.ToConcurrent()
         };
         inputDeps = JobHandle.CombineDependencies(
-            computeIndexMap.Schedule(humanEntities.Length, 64, inputDeps),
-            computeSpacialMap.Schedule(humanTransforms.Length, 64, inputDeps)
+            computeIndexMap.Schedule(actors.Length, 64, inputDeps),
+            computeSpacialMap.Schedule(actors.Length, 64, inputDeps)
         );
-      
-        var zombieTargets = zombieDataGroup.GetComponentDataArray<Target>();
-        var zombieTransforms = zombieDataGroup.GetComponentDataArray<Transform>();
+
         var runZombieTargeting = new RunZombieTargeting{
             scale = scale,
+            actors = actors,
             layout = EntityUtil.Layout,
-            zombieTargets = zombieTargets,
-            humanEntities = humanEntities,
-            humanIndexMap = humanIndexMap,
-            humanSpacialMap = humanSpacialMap,
-            humanTransforms = humanTransforms,
-            zombieTransforms = zombieTransforms
+            targets = targets,
+            entities = entities,
+            indexMap = indexMap,
+            spacialMap = spacialMap,
+            transforms = transforms
         };
         inputDeps = runZombieTargeting.Schedule(
-            zombieTargets.Length, 64, inputDeps
+            actors.Length, 64, inputDeps
         );
         
         var clrIndexMap = new ClrIndexMap{
-            humanIndexMap = humanIndexMap
+            indexMap = indexMap
         };
         var clrSpacialMap = new ClrSpacialMap{
-            humanSpacialMap = humanSpacialMap
+            spacialMap = spacialMap
         };
         return JobHandle.CombineDependencies(
             clrIndexMap.Schedule(inputDeps),
@@ -85,41 +86,48 @@ class ZombieTargetingSystem : JobComponentSystem
     [BurstCompile]
     private struct ClrIndexMap : IJob
     {
-        public NativeHashMap<int, int> humanIndexMap;
+        public NativeHashMap<int, int> indexMap;
         
         public void Execute()
-        { humanIndexMap.Clear(); }
+        { indexMap.Clear(); }
     }
     
     private struct ClrSpacialMap : IJob
     {
-        public NativeMultiHashMap<uint, int> humanSpacialMap;
+        public NativeMultiHashMap<uint, int> spacialMap;
         
         public void Execute()
-        { humanSpacialMap.Clear(); }
+        { spacialMap.Clear(); }
     }
     
     [BurstCompile]
     private struct ComputeIndexMap : IJobParallelFor
     {
         [ReadOnly]
-        public EntityArray humanEntities;
+        public EntityArray entities;
+        [ReadOnly]
+        public ComponentDataArray<Actor> actors;
         
-        public NativeHashMap<int, int>.Concurrent humanIndexMap;
+        public NativeHashMap<int, int>.Concurrent indexMap;
         
         public void Execute(int index)
         {
-            var key = humanEntities[index].GetHashCode();
-            humanIndexMap.TryAdd(key, index);
+            if (Actor.Type.Human != actors[index].Value)
+                return;
+
+            var key = entities[index].GetHashCode();
+            indexMap.TryAdd(key, index);
         }
     }
-    
+
     [BurstCompile]
     private struct ComputeSpacialMap : IJobParallelFor
     {
         public float scale;
         public double3 layout;
-        
+
+        [ReadOnly]
+        public ComponentDataArray<Actor> actors;
         [ReadOnly]
         public ComponentDataArray<Transform> transforms;
         
@@ -127,6 +135,9 @@ class ZombieTargetingSystem : JobComponentSystem
         
         public void Execute(int index)
         {
+            if (Actor.Type.Human != actors[index].Value)
+                return;
+
             var t = transforms[index];
             var p = (double2)t.Position / scale;
             var q = (layout.x * p.x + p.y) * 2.0;
@@ -142,22 +153,27 @@ class ZombieTargetingSystem : JobComponentSystem
         public float scale;
         public double3 layout;
         
-        public ComponentDataArray<Target> zombieTargets;
+        public ComponentDataArray<Target> targets;
         
         [ReadOnly]
-        public EntityArray humanEntities;
+        public EntityArray entities;
+        
         [ReadOnly]
-        public NativeHashMap<int, int> humanIndexMap;
+        public NativeHashMap<int, int> indexMap;
         [ReadOnly]
-        public NativeMultiHashMap<uint, int> humanSpacialMap;
+        public NativeMultiHashMap<uint, int> spacialMap;
+        
         [ReadOnly]
-        public ComponentDataArray<Transform> humanTransforms;
+        public ComponentDataArray<Actor> actors;
         [ReadOnly]
-        public ComponentDataArray<Transform> zombieTransforms;
+        public ComponentDataArray<Transform> transforms;
     
         public void Execute(int index)
         {
-            var target = zombieTargets[index];
+            if (Actor.Type.Zombie != actors[index].Value)
+                return;
+
+            var target = targets[index];
     
             // Note: Temp zombie disable
             if (target.Entity == -2)
@@ -165,25 +181,25 @@ class ZombieTargetingSystem : JobComponentSystem
             
             if (target.Entity != -1)
             {
-                if (humanIndexMap.TryGetValue(target.Entity, out var i))
+                if (indexMap.TryGetValue(target.Entity, out var i))
                 {
-                    target.Position = humanTransforms[i].Position;
-                    zombieTargets[index] = target;
+                    target.Position = transforms[i].Position;
+                    targets[index] = target;
                     return;
                 }
             }
-            
-            var t = zombieTransforms[index];
+
+            var t = transforms[index];
             var s = (double2)t.Position / scale;
             var q = (layout.x * s.x + s.y) * 2.0;
             var r = (layout.y * s.x + layout.z * s.y) * 2.0;
             var k = (int2)math.round(new double2(q, r));
-            
+
             // Note: Check the tile the zombie is on and 'All' tiles around it.
             // The zombie might be on the edge of a tile and it should pick the
             // closest target to it self. 'It' should not be running off to the other
             // side of the tile when there is a human right next to it across the border.
-            
+
             var currIndex = -1;
             var currDistance = float.MaxValue;
             currIndex = FindTarget(
@@ -220,29 +236,28 @@ class ZombieTargetingSystem : JobComponentSystem
                 // Note: Temp zombie disable,
                 // works because hash is >= 0.
                 target.Entity = -2;
-                zombieTargets[index] = target;
+                targets[index] = target;
                 return;
             }
 
-            target.Entity = humanEntities[currIndex].GetHashCode();
-            target.Position = humanTransforms[currIndex].Position;
-            zombieTargets[index] = target;
+            target.Entity = entities[currIndex].GetHashCode();
+            target.Position = transforms[currIndex].Position;
+            targets[index] = target;
         }
 
         private int FindTarget(uint key, int index, float2 position, float inDistance, out float outDistance)
         {
-            if (!humanSpacialMap.TryGetFirstValue(key, out var idx, out var itr))
+            if (!spacialMap.TryGetFirstValue(key, out var idx, out var itr))
             { outDistance = inDistance; return index; }
-                
-            
-            var distSquared = math.distance(position, humanTransforms[idx].Position);
+
+            var distSquared = math.distance(position, transforms[idx].Position);
             if (!(distSquared < inDistance)) { outDistance = inDistance; return index; }
             outDistance = distSquared;
             index = idx;
             
-            while (humanSpacialMap.TryGetNextValue(out idx, ref itr))
+            while (spacialMap.TryGetNextValue(out idx, ref itr))
             {
-                distSquared = math.distance(position, humanTransforms[idx].Position);
+                distSquared = math.distance(position, transforms[idx].Position);
                 if (!(distSquared < outDistance)) continue;
                 outDistance = distSquared;
                 index = idx;
