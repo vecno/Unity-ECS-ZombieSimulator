@@ -236,7 +236,7 @@ MonoBehaviour:
   HumanCount: 25000
   ZombieCount: 10
   HumanSpeed: 6
-  ZombieSpeed: 6
+  ZombieSpeed: 7
   InfectionDistance: 1
   Playfield:
     serializedVersion: 2
@@ -293,6 +293,7 @@ MonoBehaviour:
     mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
     material: {fileID: 2100000, guid: 3d6c2423d53289c4ca084d447b18c73d, type: 2}
     subMesh: 0
+    layer: 0
     castShadows: 1
     receiveShadows: 1
 --- !u!114 &1414045374
@@ -371,6 +372,7 @@ MonoBehaviour:
     mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
     material: {fileID: 2100000, guid: 6d907ddaafe2b4244897478cb5a1d745, type: 2}
     subMesh: 0
+    layer: 0
     castShadows: 1
     receiveShadows: 1
 --- !u!114 &1507792996
