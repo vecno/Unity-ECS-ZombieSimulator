@@ -10,8 +10,8 @@ public class ZombieSimulatorBootstrap
 {
     public static ZombieSettings Settings { get; private set; }
 
-    public static MeshInstanceRenderer HumanLook { get; private set; }
-    public static MeshInstanceRenderer ZombieLook { get; private set; }
+    public static RenderMesh HumanLook { get; private set; }
+    public static RenderMesh ZombieLook { get; private set; }
 
     public static EntityArchetype LogicArchetype { get; private set; }
     public static EntityArchetype HumanRenderArchetype { get; private set; }
@@ -158,23 +158,22 @@ public class ZombieSimulatorBootstrap
             ComponentType.Create<Human>(),
             ComponentType.Create<Position>(),
             ComponentType.Create<Rotation>(),
-            ComponentType.Create<MeshInstanceRenderer>()
+            ComponentType.Create<RenderMesh>()
         );
         ZombieRenderArchetype = entityManager.CreateArchetype(
             ComponentType.Create<Owner>(),
             ComponentType.Create<Zombie>(),
             ComponentType.Create<Position>(),
             ComponentType.Create<Rotation>(),
-            ComponentType.Create<MeshInstanceRenderer>()
+            ComponentType.Create<RenderMesh>()
         );
     }
 
-    private static MeshInstanceRenderer GetLookFromPrototype(string protoName)
+    private static RenderMesh GetLookFromPrototype(string protoName)
     {
         var proto = GameObject.Find(protoName);
-        var result = proto.GetComponent<MeshInstanceRendererComponent>().Value;
+        var result = proto.GetComponent<RenderMeshComponent>().Value;
         UnityEngine.Object.Destroy(proto);
         return result;
     }
-
 }

@@ -361,6 +361,7 @@ MonoBehaviour:
     mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
     material: {fileID: 2100000, guid: 3d6c2423d53289c4ca084d447b18c73d, type: 2}
     subMesh: 0
+    layer: 0
     castShadows: 1
     receiveShadows: 1
 --- !u!114 &1414045374
@@ -425,7 +426,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 10303, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 2100000, guid: 6d907ddaafe2b4244897478cb5a1d745, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -516,6 +517,7 @@ MonoBehaviour:
     mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
     material: {fileID: 2100000, guid: 6d907ddaafe2b4244897478cb5a1d745, type: 2}
     subMesh: 0
+    layer: 0
     castShadows: 1
     receiveShadows: 1
 --- !u!114 &1507792996
